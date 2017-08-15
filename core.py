@@ -37,6 +37,29 @@ def create_bias_var(name, shape):
     return tf.Variable(initial, name=name)
 
 
+def create_conv2d(name, x, W, mode="VALID"):
+    """
+    Create 2D convolution with stride 1
+    :param name: The name of the variable
+    :param x: The input tensor
+    :param W: The convolution weights of desired shape
+    :param mode: The convolution mode 'VALID' or 'SAME'
+    :return: The convolution operation
+    """
+    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding=mode, name=name)
+
+
+def create_meanpool2d(x, ax1, ax2):
+    """
+    Create average 2D pooling operation (i.e. binning operation leaving batch and channel axis untouched)
+    :param x: The input tensor
+    :param ax1: The amount of pooling along the first 2D axis
+    :param ax2: The amount of pooling along the second 2D axis
+    :return: The pooling operation
+    """
+    return tf.nn.avg_pool(x, ksize=[1, ax1, ax2, 1], strides=[1, ax1, ax2, 1], padding='SAME')
+
+
 def get_loss(labels, predictions, loss_collection="losses"):
     """
     Computes the total loss as the mean squared error loss of the current prediction and
