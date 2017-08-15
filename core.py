@@ -35,3 +35,31 @@ def create_bias_var(name, shape):
     """
     initial = tf.constant(0.1, shape=shape)
     return tf.Variable(initial, name=name)
+
+
+def get_loss(labels, predictions, loss_collection="losses"):
+    """
+    Computes the total loss as the mean squared error loss of the current prediction and
+    all the weight decay losses in the model
+    :param labels: The real output values
+    :param predictions: The output predictions
+    :param loss_collection: The name of the collection containing all losses
+    :return: The total loss tensor
+    """
+    # Calculate batch average mean squared loss
+    sq_loss = tf.losses.mean_squared_error(labels=labels, predictions=predictions)
+    joint_loss = tf.reduce_sum(sq_loss)
+    tf.add_to_collection(loss_collection, joint_loss)
+    return tf.add_n(tf.get_collection(loss_collection), name='total_loss')
+
+
+def create_train_step(labels, predictions, loss_collection="losses"):
+    """
+        Creates a training step of the model given the labels and predictions tensor
+        :param labels: The real output values
+        :param predictions: The output predictions
+        :param loss_collection: The name of the collection containing all losses
+        :return: The train step
+    """
+    total_loss = get_loss(labels, predictions, loss_collection)
+    return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
