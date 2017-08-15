@@ -40,7 +40,7 @@ def create_bias_var(name, shape):
 def create_conv2d(name, x, W, mode="VALID"):
     """
     Create 2D convolution with stride 1
-    :param name: The name of the variable
+    :param name: The name of the operation output
     :param x: The input tensor
     :param W: The convolution weights of desired shape
     :param mode: The convolution mode 'VALID' or 'SAME'
@@ -49,15 +49,16 @@ def create_conv2d(name, x, W, mode="VALID"):
     return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding=mode, name=name)
 
 
-def create_meanpool2d(x, ax1, ax2):
+def create_meanpool2d(name, x, ax1, ax2):
     """
     Create average 2D pooling operation (i.e. binning operation leaving batch and channel axis untouched)
+    :param name: The name of the operation output
     :param x: The input tensor
     :param ax1: The amount of pooling along the first 2D axis
     :param ax2: The amount of pooling along the second 2D axis
     :return: The pooling operation
     """
-    return tf.nn.avg_pool(x, ksize=[1, ax1, ax2, 1], strides=[1, ax1, ax2, 1], padding='SAME')
+    return tf.nn.avg_pool(x, ksize=[1, ax1, ax2, 1], strides=[1, ax1, ax2, 1], padding='SAME', name=name)
 
 
 def get_loss(labels, predictions, loss_collection="losses"):
@@ -86,3 +87,9 @@ def create_train_step(labels, predictions, loss_collection="losses"):
     """
     total_loss = get_loss(labels, predictions, loss_collection)
     return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
+
+
+# Constants
+FRAME_RATE = 100  # all simulations, training data models have a native framerate of 100 Hz
+HIST_SECONDS = 4  # all inputs to the models are 4s into the past
+MODEL_RATE = 5    # model input rate is 5 Hz
