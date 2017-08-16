@@ -45,8 +45,50 @@ class GradientData:
     Class that represents training/test data from a gradient experiment
     """
     def __init__(self, model_in, model_out):
+        """
+        Creates a new GradientData object
+        :param model_in: The input data for training
+        :param model_out: The real output for training
+        """
         self.model_in_raw = model_in
         self.model_out_raw = model_out
+        self.data_size = model_in.shape[0]
+
+    def training_batch(self, batchsize):
+        """
+        Retrieves one training batch as a random sample from the underlying data
+        :param batchsize:
+        :return: tuple of inputs and outputs
+        """
+        ix_batch = np.random.choice(np.arange(self.data_size), batchsize)
+        return self.model_in_raw[ix_batch, :, :], self.model_out_raw[ix_batch, :]
+
+    def save(self, filename, overwrite=False):
+        """
+        Saves the actual data to an hdf5 file
+        :param filename: The file to save the data to
+        :param overwrite: If true file will be overwritten if it exists
+        """
+        if overwrite:
+            dfile = h5py.File(filename, 'w')
+        else:
+            dfile = h5py.File(filename, 'x')
+        dfile.create_dataset("model_in_raw", data=self.model_in_raw)
+        dfile.create_dataset("model_out_raw", data=self.model_out_raw)
+        dfile.close()
+
+    @staticmethod
+    def load(filename):
+        """
+        Loads training data from an hdf5 file
+        :param filename: The file to load data from
+        :return: A GradientData object with the file data
+        """
+        dfile = h5py.File(filename, 'r')
+        if "model_in_raw" not in dfile or "model_out_raw" not in dfile:
+            dfile.close()
+            raise IOError("File does not seem to contain gradient data")
+        return GradientData(np.array(dfile["model_in_raw"]), np.array(dfile["model_out_raw"]))
 
 
 class GradientSimulation:
