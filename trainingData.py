@@ -121,6 +121,7 @@ class GradientSimulation:
         # Displacement is drawn from gamma distribution
         self.disp_k = 2.63
         self.disp_theta = 1 / 0.138
+        self.avg_disp = self.disp_k * self.disp_theta
         # Turn angles of straight swims and turns are drawn from gaussian
         self.mu_str = np.deg2rad(0)
         self.sd_str = np.deg2rad(2)
@@ -153,23 +154,36 @@ class GradientSimulation:
         else:
             return "R"
 
-    def get_bout_trajectory(self, start, bout_type="S"):
+    def get_bout_trajectory(self, start, bout_type="S", expected=False):
         """
         Gets a trajectory for the given bout type
         :param start: Tuple/vector of x, y, angle at start of bout
         :param bout_type: The type of bout: (S)traight, (L)eft turn, (R)ight turn
+        :param expected: If true, instead of picking random bout pick the expected bout in the category
         :return: The trajectory of the bout (blen rows, 3 columns: x, y, angle)
         """
         if bout_type == "S":
-            da = self.__str_cash.next_rand()
+            if expected:
+                da = self.mu_str
+            else:
+                da = self.__str_cash.next_rand()
         elif bout_type == "L":
-            da = -1 * self.__trn_cash.next_rand()
+            if expected:
+                da = -1 * self.mu_trn
+            else:
+                da = -1 * self.__trn_cash.next_rand()
         elif bout_type == "R":
-            da = self.__trn_cash.next_rand()
+            if expected:
+                da = self.mu_trn
+            else:
+                da = self.__trn_cash.next_rand()
         else:
             raise ValueError("bout_type has to be one of S, L, or R")
         heading = start[2] + da
-        disp = self.__disp_cash.next_rand()
+        if expected:
+            disp = self.avg_disp
+        else:
+            disp = self.__disp_cash.next_rand()
         dx = np.cos(heading) * disp * self.bfrac
         dy = np.sin(heading) * disp * self.bfrac
         # reflect bout if it would take us outside the dish
@@ -207,7 +221,8 @@ class GradientSimulation:
             all_pos[0, :] = start_pos
             i = 1
         else:
-            traj = self.get_bout_trajectory(start_pos, start_type)
+            # if a start bout should be drawn, draw the "expected" bout not a random one
+            traj = self.get_bout_trajectory(start_pos, start_type, True)
             if traj.size <= nsteps:
                 all_pos[:traj.shape[0], :] = traj
                 i = traj.size
