@@ -61,7 +61,7 @@ class GradientData:
         :return: tuple of inputs and outputs
         """
         ix_batch = np.random.choice(np.arange(self.data_size), batchsize)
-        return self.model_in_raw[ix_batch, :, :], self.model_out_raw[ix_batch, :]
+        return self.model_in_raw[ix_batch, :, :, None], self.model_out_raw[ix_batch, :]
 
     def save(self, filename, overwrite=False):
         """
