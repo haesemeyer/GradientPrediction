@@ -93,4 +93,4 @@ def create_train_step(labels, predictions, loss_collection="losses"):
 FRAME_RATE = 100  # all simulations, training data models have a native framerate of 100 Hz
 HIST_SECONDS = 4  # all inputs to the models are 4s into the past
 MODEL_RATE = 5    # model input rate is 5 Hz
-PRED_WINDOW = int(FRAME_RATE / 0.5)  # the model should predict the temperature 500 ms into the future
+PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 500 ms into the future
