@@ -44,15 +44,21 @@ class GradientData:
     """
     Class that represents training/test data from a gradient experiment
     """
-    def __init__(self, model_in, model_out):
+    def __init__(self, model_in, model_out, pred_window=PRED_WINDOW, frame_rate=FRAME_RATE, hist_seconds=HIST_SECONDS):
         """
         Creates a new GradientData object
         :param model_in: The input data for training
         :param model_out: The real output for training
+        :param pred_window: The prediction window used in the simulation
+        :param frame_rate: The frame rate used in the simulation
+        :param hist_seconds: The length of history provided to the model in seconds
         """
         self.model_in_raw = model_in
         self.model_out_raw = model_out
         self.data_size = model_in.shape[0]
+        self.pred_window = pred_window
+        self.frame_rate = frame_rate
+        self.hist_seconds = hist_seconds
 
     def training_batch(self, batchsize):
         """
@@ -73,9 +79,15 @@ class GradientData:
             dfile = h5py.File(filename, 'w')
         else:
             dfile = h5py.File(filename, 'x')
-        dfile.create_dataset("model_in_raw", data=self.model_in_raw)
-        dfile.create_dataset("model_out_raw", data=self.model_out_raw)
-        dfile.close()
+        try:
+            dfile.create_dataset("model_in_raw", data=self.model_in_raw)
+            dfile.create_dataset("model_out_raw", data=self.model_out_raw)
+            grp = dfile.create_group("model_info")
+            grp.create_dataset("PRED_WINDOW", data=self.pred_window)
+            grp.create_dataset("FRAME_RATE", data=self.frame_rate)
+            grp.create_dataset("HIST_SECONDS", data=self.hist_seconds)
+        finally:
+            dfile.close()
 
     @staticmethod
     def load(filename):
@@ -88,7 +100,10 @@ class GradientData:
         if "model_in_raw" not in dfile or "model_out_raw" not in dfile:
             dfile.close()
             raise IOError("File does not seem to contain gradient data")
-        return GradientData(np.array(dfile["model_in_raw"]), np.array(dfile["model_out_raw"]))
+        p = np.array(dfile["model_info"]["PRED_WINDOW"])
+        f = np.array(dfile["model_info"]["FRAME_RATE"])
+        h = np.array(dfile["model_info"]["HIST_SECONDS"])
+        return GradientData(np.array(dfile["model_in_raw"]), np.array(dfile["model_out_raw"]), p, f, h)
 
 
 class GradientSimulation:
@@ -283,4 +298,21 @@ class GradientSimulation:
 
 
 if __name__ == '__main__':
-    pass
+    import matplotlib.pyplot as pl
+    import seaborn as sns
+    response = ""
+    while response not in ["y", "n"]:
+        response = input("Run simulation with default arena? [y/n]:")
+    if response == "y":
+        nsteps = int(input("Number of steps to perform?"))
+        gradsim = GradientSimulation(nsteps, 100, 22, 37)
+        print("Running gradient simulation")
+        pos = gradsim.run_simulation()
+        pl.figure()
+        pl.plot(pos[:, 0], pos[:, 1])
+        pl.xlabel("X position [mm]")
+        pl.ylabel("Y position [mm]")
+        sns.despine()
+        print("Generating gradient data")
+        grad_data = gradsim.create_dataset(pos)
+        print("Done")
