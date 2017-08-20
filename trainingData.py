@@ -59,6 +59,17 @@ class GradientData:
         self.pred_window = pred_window
         self.frame_rate = frame_rate
         self.hist_seconds = hist_seconds
+        self.temp_mean = np.mean(self.model_in_raw[:, 0, :])
+        self.temp_std = np.std(self.model_in_raw[:, 0, :])
+        self.disp_mean = np.mean(self.model_in_raw[:, 1, :])
+        self.disp_std = np.std(self.model_in_raw[:, 1, :])
+        self.ang_mean = np.mean(self.model_in_raw[:, 2, :])
+        self.ang_std = np.std(self.model_in_raw[:, 2, :])
+
+    def zsc_inputs(self, m_in):
+        sub = np.r_[self.temp_mean, self.disp_mean, self.ang_mean][None, :, None]
+        div = np.r_[self.temp_std, self.disp_std, self.ang_std][None, :, None]
+        return (m_in - sub) / div
 
     def training_batch(self, batchsize):
         """
@@ -67,7 +78,9 @@ class GradientData:
         :return: tuple of inputs and outputs
         """
         ix_batch = np.random.choice(np.arange(self.data_size), batchsize)
-        return self.model_in_raw[ix_batch, :, :, None], self.model_out_raw[ix_batch, :]
+        m_in = self.model_in_raw[ix_batch, :, :]
+        m_o = (self.model_out_raw[ix_batch, :] - self.temp_mean) / self.temp_std
+        return self.zsc_inputs(m_in)[:, :, :, None], m_o
 
     def save(self, filename, overwrite=False):
         """
