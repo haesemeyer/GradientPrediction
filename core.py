@@ -74,18 +74,15 @@ def get_loss(labels, predictions, loss_collection="losses"):
     sq_loss = tf.losses.mean_squared_error(labels=labels, predictions=predictions)
     joint_loss = tf.reduce_sum(sq_loss)
     tf.add_to_collection(loss_collection, joint_loss)
-    return tf.add_n(tf.get_collection(loss_collection), name='total_loss')
+    return tf.add_n(tf.get_collection(loss_collection), name='total_loss'), joint_loss
 
 
-def create_train_step(labels, predictions, loss_collection="losses"):
+def create_train_step(total_loss):
     """
         Creates a training step of the model given the labels and predictions tensor
-        :param labels: The real output values
-        :param predictions: The output predictions
-        :param loss_collection: The name of the collection containing all losses
+        :param total_loss: The total loss of the model
         :return: The train step
     """
-    total_loss = get_loss(labels, predictions, loss_collection)
     return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
 
 
