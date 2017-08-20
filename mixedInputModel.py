@@ -11,51 +11,59 @@ import tensorflow as tf
 import core
 
 
-def create_dense_layer(name_sfx: str):
+def create_hidden_layer(name_sfx, prev_out, n_units):
     """
-    Creates a behavior specific dense layer
-    :param name_sfx: Variable name suffix identifying behavior output
-    :return: weigths, biases, layer units
+    Creates a hidden layer taking in information from another layer
+    :param name_sfx: The name suffix to use for this layer
+    :param prev_out: The output of the previous layer
+    :param n_units: The number of units in the layer
+    :return: weights, biases and layer units of hidden layer
     """
-    w = core.create_weight_var("W_h_" + name_sfx, [N_CONV_LAYERS, N_DENSE], WDECAY)
-    b = core.create_bias_var("B_h_" + name_sfx, [N_DENSE])
-    h = tf.nn.relu(tf.matmul(h_conv1_flat, w) + b, "h_" + name_sfx)
+    w = core.create_weight_var("W_h_" + name_sfx, [prev_out.shape[1].value, n_units], WDECAY)
+    b = core.create_bias_var("B_h_" + name_sfx, [n_units])
+    h = tf.nn.relu(tf.matmul(prev_out, w) + b, "h_" + name_sfx)
     return w, b, h
 
 
-def create_output(name_sfx: str, prev_out):
+def create_dense_layers(prev_out):
     """
-    Creates behavior specific output layer
-    :param name_sfx: Variable name suffix identifying behavior output
+    Creates the dense hidden layers of our model
+    :param prev_out: The output of the previous layer
+    :return: weigths, biases, layer units of last dense and list of intermediate layers if any
+    """
+    if N_HIDDEN < 2:
+        w, b, h = create_hidden_layer("0", prev_out, N_DENSE[0])
+        return w, b, h, []
+    else:
+        intermediate = []
+        drop = prev_out
+        for l in range(N_HIDDEN - 1):
+            w, b, h = create_hidden_layer(str(l), drop, N_DENSE[l])
+            drop = tf.nn.dropout(h, keep_prob, name="h_drop_" + str(l))
+            intermediate.append((w, b, h, drop))
+        # last layer
+        w, b, h = create_hidden_layer(str(N_HIDDEN-1), drop, N_DENSE[N_HIDDEN-1])
+        return w, b, h, intermediate
+
+
+def create_output(prev_out):
+    """
+    Creates the output layer for reporting predicted temperature of all four behaviors
     :param prev_out: The output of the previous layer
     :return: weights, biases, output
     """
-    w = core.create_weight_var("W_o_" + name_sfx, [N_DENSE, 1], WDECAY)
-    b = core.create_bias_var("B_o_" + name_sfx, [1])
+    w = core.create_weight_var("W_o", [prev_out.shape[1].value, 4], WDECAY)
+    b = core.create_bias_var("B_o", [4])
     out = tf.matmul(prev_out, w) + b
     return w, b, out
 
 
-def create_behav_section(name_sfx: str):
-    """
-    Creates a behavior specific section of the model
-    :param name_sfx: Variable name suffix identifying behavior output
-    :return:
-        [0]: Hidden layer: weights, biases, units
-        [1]: Dropout layer
-        [2]: Output layer: weights, biases, output
-    """
-    w_h, b_h, l_h = create_dense_layer(name_sfx)
-    h_drop = tf.nn.dropout(l_h, keep_prob, name="h_drop_" + name_sfx)
-    w_o, b_o, o = create_output(name_sfx, h_drop)
-    return (w_h, b_h, l_h), h_drop, (w_o, b_o, o)
-
-
 # Hyper parameters of the model
 N_CONV_LAYERS = 40  # the number of convolution filters
-N_DENSE = 512  # the number of units in the hidden layer
+N_HIDDEN = 3  # the number of hidden layers
+N_DENSE = [2048, 2048, 1024]  # the number of units in each hidden layer
 WDECAY = 1e-4  # weight decay constant
-DROP_TRAIN = 0.5  # dropout probability during training
+KEEP_TRAIN = 0.5  # keep probability during training
 
 # globals
 assert core.FRAME_RATE % core.MODEL_RATE == 0
@@ -65,7 +73,7 @@ binned_size = core.FRAME_RATE * core.HIST_SECONDS // t_bin
 # dropout probability placeholder
 keep_prob = tf.placeholder(tf.float32)
 
-# Shared network structure
+# Network structure
 # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
 x_in = tf.placeholder(tf.float32, [None, 3, core.FRAME_RATE*core.HIST_SECONDS, 1], "x_in")
 # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
@@ -78,45 +86,44 @@ B_conv1 = core.create_bias_var("B_conv1", [N_CONV_LAYERS])
 conv1 = core.create_conv2d("conv1", xin_pool, W_conv1)
 h_conv1 = tf.nn.relu(conv1 + B_conv1, "h_conv1")
 h_conv1_flat = tf.reshape(h_conv1, [-1, N_CONV_LAYERS], "h_conv1_flat")
-
-# Behavioral output specific network structure
-# 1) Stay
-hidden_stay, drop_stay, out_stay = create_behav_section("stay")
-# 2) Straight
-hidden_str, drop_str, out_str = create_behav_section("str")
-# 3) Left
-hidden_left, drop_left, out_left = create_behav_section("left")
-# 4) Right
-hidden_right, drop_right, out_right = create_behav_section("right")
-
-# combine outputs
-m_out = tf.concat([out_stay[2], out_str[2], out_left[2], out_right[2]], 1)
+# dense layers
+w_h_last, b_h_last, h_last, interim = create_dense_layers(h_conv1_flat)
+# dropout on last layer
+h_drop_last = tf.nn.dropout(h_last, keep_prob, name="h_drop_"+str(N_HIDDEN-1))
+# create output layer
+w_out, b_out, m_out = create_output(h_drop_last)
 
 # get model loss and training step
-total_loss = core.get_loss(y_, m_out)
-t_step = core.create_train_step(y_, m_out)
+total_loss, sq_loss = core.get_loss(y_, m_out)
+t_step = core.create_train_step(total_loss)
 
 if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as pl
     import seaborn as sns
+    from scipy.ndimage import gaussian_filter1d
     print("Testing mixedInputModel", flush=True)
     print("For each 'behavior' subpart attempt to learn different sums on standard normal distribution", flush=True)
+    t_losses = []
+    d_fracs = []
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         for i in range(10000):
             xb1 = np.random.randn(100, 1, core.FRAME_RATE * core.HIST_SECONDS, 1)
             xb2 = xb1 ** 2
+            xb2 -= 1  # expected average of xb1**2
             xb3 = xb1 ** 3
             xbatch = np.concatenate((xb1, xb2, xb3), 1)
-            ybatch = np.c_[np.sum(xb1 ** 2, axis=(1, 2)), np.sum((xb1/2) ** 2, axis=(1, 2)),
+            ybatch = np.c_[np.sum(xb2, axis=(1, 2)), np.sum(xb2 / 4, axis=(1, 2)),
                            np.sum(xb1, axis=(1, 2)), np.sum(xb1 / 2, axis=(1, 2))]
-            cur_l = total_loss.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})
-            cur_d = np.median(np.abs((ybatch - m_out.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})) /
-                                     ybatch))
+            cur_l = sq_loss.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})
+            pred = m_out.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})
+            cur_d = np.median(np.abs((ybatch - pred) / ybatch))
+            t_losses.append(cur_l)
+            d_fracs.append(cur_d)
             if i % 200 == 0:
                 print('step %d, training loss %g, delta fraction %g' % (i, cur_l, cur_d))
-            t_step.run(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: DROP_TRAIN})
+            t_step.run(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: KEEP_TRAIN})
         weights_conv1 = W_conv1.eval()
         bias_conv1 = B_conv1.eval()
 
@@ -127,3 +134,16 @@ if __name__ == "__main__":
     for i, a in enumerate(ax):
         sns.heatmap(weights_conv1[:, :, 0, i], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
         a.axis("off")
+
+    pl.figure()
+    pl.plot(t_losses, 'o')
+    pl.xlabel("Batch")
+    pl.ylabel("Training loss")
+    sns.despine()
+
+    pl.figure()
+    pl.plot(d_fracs, 'o')
+    pl.plot(gaussian_filter1d(d_fracs, 25))
+    pl.xlabel("Batch")
+    pl.ylabel("Error fraction")
+    sns.despine()
