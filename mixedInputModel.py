@@ -60,8 +60,8 @@ def create_output(prev_out):
 
 # Hyper parameters of the model
 N_CONV_LAYERS = 40  # the number of convolution filters
-N_HIDDEN = 3  # the number of hidden layers
-N_DENSE = [2048, 2048, 1024]  # the number of units in each hidden layer
+N_DENSE = [2048, 2048, 2048]  # the number of units in each hidden layer
+N_HIDDEN = len(N_DENSE)  # the number of hidden layers
 WDECAY = 1e-4  # weight decay constant
 KEEP_TRAIN = 0.5  # keep probability during training
 
