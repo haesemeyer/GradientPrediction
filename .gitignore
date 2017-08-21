@@ -17,3 +17,4 @@ test*
 .idea/
 *.autosave
 *.hdf5
+model_data/
