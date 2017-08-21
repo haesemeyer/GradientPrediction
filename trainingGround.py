@@ -20,6 +20,13 @@ if __name__ == "__main__":
     import mixedInputModel as mIM
     trainingData = GradientData.load("gd_training_data.hdf5")
     testData = GradientData.load("gd_test_data_1.hdf5")
+    # enforce same scaling on testData as on trainingData
+    testData.ang_mean = trainingData.ang_mean
+    testData.ang_std = trainingData.ang_std
+    testData.disp_mean = trainingData.disp_mean
+    testData.disp_std = trainingData.disp_std
+    testData.temp_mean = trainingData.temp_mean
+    testData.temp_std = trainingData.temp_std
     train_losses = []
     rank_errors = []
     test_losses = []
@@ -30,7 +37,7 @@ if __name__ == "__main__":
     saver = tf.train.Saver(max_to_keep=None)
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        for i in range(100000):
+        for i in range(100001):
             # save naive model including full graph
             if i == 0:
                 save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=i)
