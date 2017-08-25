@@ -18,10 +18,9 @@ def create_weight_var(name, shape, w_decay=None, loss_collection="losses"):
     :param loss_collection: The name of the collection to which loss should be added
     :return: The weight variable
     """
-    initial = tf.truncated_normal(shape, stddev=1.0 / sum(shape))
-    var = tf.Variable(initial, name=name)
+    var = tf.get_variable(name, shape, initializer=tf.contrib.layers.xavier_initializer())
     if w_decay is not None:
-        weight_decay = tf.multiply(tf.nn.l2_loss(var), w_decay, name="l2_w_loss")
+        weight_decay = tf.multiply(tf.nn.l2_loss(var), w_decay, name="l2_w_loss_"+name)
         tf.add_to_collection(loss_collection, weight_decay)
     return var
 
