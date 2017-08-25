@@ -89,6 +89,9 @@ if __name__ == "__main__":
                 test_rank_errors.append(sum_rank_diffs / TESTSIZE)
 
             mIM.t_step.run(feed_dict={mIM.x_in: xbatch, mIM.y_: ybatch, mIM.keep_prob: mIM.KEEP_TRAIN})
+        # save final progress
+        save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=n_train, write_meta_graph=False)
+        print("Final model saved in file: %s" % save_path)
         weights_conv1 = mIM.W_conv1.eval()
 
     w_ext = np.max(np.abs(weights_conv1))
