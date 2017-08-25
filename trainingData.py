@@ -117,7 +117,6 @@ class GradientData:
         batch_end = self.batch_start + batchsize
         if batch_end > self.data_size:
             # one epoch is done, reshuffle data and start over
-            print("Finished training epoch. Reshuffling data.")
             self.batch_start = 0
             self.shuffle_data()
             batch_end = batchsize

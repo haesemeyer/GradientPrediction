@@ -14,8 +14,9 @@ import seaborn as sns
 from scipy.ndimage import gaussian_filter1d
 import h5py
 
-BATCHSIZE = 50
-TESTSIZE = 200
+BATCHSIZE = 32  # the sample size of each training batch
+TESTSIZE = 200  # the sample size of each test batch
+N_EPOCHS = 10  # the number of training epochs to run
 
 EVAL_TRAIN_EVERY = 5  # every this many trials training set performance is evaluated
 EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluated
@@ -41,7 +42,8 @@ if __name__ == "__main__":
     saver = tf.train.Saver(max_to_keep=None)
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        for i in range(100001):
+        n_train = (trainingData.data_size * N_EPOCHS) // BATCHSIZE
+        for i in range(n_train):
             # save naive model including full graph
             if i == 0:
                 save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=i)
@@ -66,7 +68,8 @@ if __name__ == "__main__":
                 train_losses.append(cur_l)
                 rank_errors.append(sum_rank_diffs / BATCHSIZE)
                 if i % 200 == 0:
-                    print('step %d, training loss %g, rank loss %g' % (i, cur_l, sum_rank_diffs/BATCHSIZE))
+                    print('step %d of %d, training loss %g, rank loss %g' % (i, n_train, cur_l,
+                                                                             sum_rank_diffs/BATCHSIZE))
             # every 1000 steps run test
             if i % EVAL_TEST_EVERY == 0:
                 test = testData.training_batch(TESTSIZE)
