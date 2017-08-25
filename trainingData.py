@@ -53,20 +53,57 @@ class GradientData:
         :param frame_rate: The frame rate used in the simulation
         :param hist_seconds: The length of history provided to the model in seconds
         """
-        self.model_in_raw = model_in
-        self.model_out_raw = model_out
+        self.model_in = model_in
+        self.model_out = model_out
         self.data_size = model_in.shape[0]
+        self.rev_map = np.arange(self.data_size)  # nothing shuffled yet
+        # randomly shuffle input data and store reverse mapping
+        self.shuffle_data()
+        # store other information
         self.pred_window = pred_window
         self.frame_rate = frame_rate
         self.hist_seconds = hist_seconds
+        # compute normalization constants
         self.temp_mean = np.mean(self.model_in_raw[:, 0, :])
         self.temp_std = np.std(self.model_in_raw[:, 0, :])
         self.disp_mean = np.mean(self.model_in_raw[:, 1, :])
         self.disp_std = np.std(self.model_in_raw[:, 1, :])
         self.ang_mean = np.mean(self.model_in_raw[:, 2, :])
         self.ang_std = np.std(self.model_in_raw[:, 2, :])
+        self.batch_start = 0
+
+    def shuffle_data(self):
+        """
+        Shuffles the model data, storing reverse mapping for retrieval of data in original order
+        """
+        all_ix = np.arange(self.data_size)
+        shuff_ix = np.random.choice(all_ix, self.data_size, False)
+        self.model_in = self.model_in_raw[shuff_ix, :, :].copy()
+        self.model_out = self.model_out_raw[shuff_ix, :].copy()
+        self.rev_map = np.full(self.data_size, -1)
+        for i in range(self.data_size):
+            self.rev_map[shuff_ix[i]] = i
+
+    @property
+    def model_in_raw(self):
+        """
+        The model in data in original order
+        """
+        return self.model_in[self.rev_map, :, :]
+
+    @property
+    def model_out_raw(self):
+        """
+        The model out data in original order
+        """
+        return self.model_out[self.rev_map, :]
 
     def zsc_inputs(self, m_in):
+        """
+        Return z-scored version of model input matrix
+        :param m_in: The model input matrix
+        :return: Column Zscored matrix
+        """
         sub = np.r_[self.temp_mean, self.disp_mean, self.ang_mean][None, :, None]
         div = np.r_[self.temp_std, self.disp_std, self.ang_std][None, :, None]
         return (m_in - sub) / div
@@ -77,9 +114,17 @@ class GradientData:
         :param batchsize:
         :return: tuple of inputs and outputs
         """
-        ix_batch = np.random.choice(np.arange(self.data_size), batchsize)
-        m_in = self.model_in_raw[ix_batch, :, :]
-        m_o = (self.model_out_raw[ix_batch, :] - self.temp_mean) / self.temp_std
+        batch_end = self.batch_start + batchsize
+        if batch_end > self.data_size:
+            # one epoch is done, reshuffle data and start over
+            print("Finished training epoch. Reshuffling data.")
+            self.batch_start = 0
+            self.shuffle_data()
+            batch_end = batchsize
+        m_in = self.model_in[self.batch_start:batch_end, :, :]
+        m_o = (self.model_out[self.batch_start:batch_end, :] - self.temp_mean) / self.temp_std
+        # update batch start for next call
+        self.batch_start = batch_end
         return self.zsc_inputs(m_in)[:, :, :, None], m_o
 
     def save(self, filename, overwrite=False):
