@@ -7,6 +7,8 @@ Commonly used helper functions
 """
 
 import tensorflow as tf
+import os
+from warnings import warn
 
 
 def create_weight_var(name, shape, w_decay=None, loss_collection="losses"):
@@ -83,6 +85,76 @@ def create_train_step(total_loss):
         :return: The train step
     """
     return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
+
+
+class ModelData:
+    """
+    Provides access to model meta and checkpoint files by index from a given directory
+    """
+    def __init__(self, dirname):
+        """
+        Creates a new model-data instance
+        :param dirname: Directory containing the model checkpoint and definition files
+        """
+        if not os.path.isdir(dirname):
+            raise ValueError("dirname needs to be a valid directory")
+        files = os.listdir(dirname)
+        self.__meta_file = None
+        self.__data_files = {}
+        for f in files:
+            if ".meta" in f:
+                if self.__meta_file is None:
+                    self.__meta_file = f
+                else:
+                    warn("Found at least two meta files in directory. Choosing first one.")
+            elif ".data" in f:
+                # obtain step index from filename and use as dictionary key
+                num_start = f.find(".ckpt") + 6
+                num_end = f.find(".data")
+                try:
+                    num = int(f[num_start:num_end])
+                except ValueError:
+                    continue
+                self.__data_files[num] = f
+
+    @property
+    def CheckpointIndices(self):
+        """
+        Gets the indices of available checkpoints in ascending order
+        """
+        return sorted(self.__data_files.keys())
+
+    @property
+    def FirstCheckpoint(self):
+        """
+        Gets the filename of the first available model checkpoint (naive)
+        """
+        return self.__data_files[self.CheckpointIndices[0]]
+
+    @property
+    def LastCheckpoint(self):
+        """
+        Gets the filename of the last available model checkpoint (fully trained)
+        """
+        return self.__data_files[self.CheckpointIndices[-1]]
+
+    @property
+    def ModelDefinition(self):
+        """
+        Gets the filename of the model definition
+        """
+        return self.__meta_file
+
+    def __contains__(self, item):
+        return item in self.__data_files
+
+    def __getitem__(self, item):
+        if type(item) != int:
+            raise TypeError("Key has to be integer")
+        if item in self.__data_files:
+            return self.__data_files[item]
+        else:
+            raise KeyError("No checkpoint with index {0} found.".format(item))
 
 
 # Constants
