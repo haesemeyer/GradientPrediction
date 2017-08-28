@@ -54,13 +54,13 @@ def create_output(prev_out):
     """
     w = core.create_weight_var("W_o", [prev_out.shape[1].value, 4], WDECAY)
     b = core.create_bias_var("B_o", [4])
-    out = tf.matmul(prev_out, w) + b
+    out = tf.add(tf.matmul(prev_out, w), b, name="m_out")
     return w, b, out
 
 
 # Hyper parameters of the model
 N_CONV_LAYERS = 40  # the number of convolution filters
-N_DENSE = [2048, 2048, 2048]  # the number of units in each hidden layer
+N_DENSE = [512, 512, 512]  # the number of units in each hidden layer
 N_HIDDEN = len(N_DENSE)  # the number of hidden layers
 WDECAY = 1e-4  # weight decay constant
 KEEP_TRAIN = 0.5  # keep probability during training
@@ -71,7 +71,7 @@ t_bin = core.FRAME_RATE // core.MODEL_RATE  # bin input down to 5Hz
 binned_size = core.FRAME_RATE * core.HIST_SECONDS // t_bin
 
 # dropout probability placeholder
-keep_prob = tf.placeholder(tf.float32)
+keep_prob = tf.placeholder(tf.float32, name="keep_prob")
 
 # Network structure
 # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
