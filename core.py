@@ -104,7 +104,7 @@ class ModelData:
         for f in files:
             if ".meta" in f:
                 if self.__meta_file is None:
-                    self.__meta_file = f
+                    self.__meta_file = dirname + "/" + f
                 else:
                     warn("Found at least two meta files in directory. Choosing first one.")
             elif ".data" in f:
@@ -115,7 +115,7 @@ class ModelData:
                     num = int(f[num_start:num_end])
                 except ValueError:
                     continue
-                self.__data_files[num] = f
+                self.__data_files[num] = dirname + "/" + f[:num_end]
 
     @property
     def CheckpointIndices(self):
