@@ -84,6 +84,18 @@ class GradientData:
         for i in range(self.data_size):
             self.rev_map[shuff_ix[i]] = i
 
+    def copy_normalization(self, gdata):
+        """
+        Copies normalization constants
+        :param gdata: Another GradientData object from which to copy normalization constants
+        """
+        self.temp_mean = gdata.temp_mean
+        self.temp_std = gdata.temp_std
+        self.disp_mean = gdata.disp_mean
+        self.disp_std = gdata.disp_std
+        self.ang_mean = gdata.ang_mean
+        self.ang_std = gdata.ang_std
+
     @property
     def model_in_raw(self):
         """

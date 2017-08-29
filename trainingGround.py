@@ -26,12 +26,7 @@ if __name__ == "__main__":
     trainingData = GradientData.load("gd_training_data.hdf5")
     testData = GradientData.load("gd_test_data_1.hdf5")
     # enforce same scaling on testData as on trainingData
-    testData.ang_mean = trainingData.ang_mean
-    testData.ang_std = trainingData.ang_std
-    testData.disp_mean = trainingData.disp_mean
-    testData.disp_std = trainingData.disp_std
-    testData.temp_mean = trainingData.temp_mean
-    testData.temp_std = trainingData.temp_std
+    testData.copy_normalization(trainingData)
     train_losses = []
     rank_errors = []
     test_losses = []
