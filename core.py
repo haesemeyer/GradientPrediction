@@ -12,6 +12,14 @@ from warnings import warn
 import numpy as np
 
 
+# Constants
+FRAME_RATE = 100  # all simulations, training data models have a native framerate of 100 Hz
+HIST_SECONDS = 4  # all inputs to the models are 4s into the past
+MODEL_RATE = 5    # model input rate is 5 Hz
+PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 500 ms into the future
+
+
+# Functions
 def create_weight_var(name, shape, w_decay=None, loss_collection="losses"):
     """
     Creates a weight variable with optional weight decay initialized with sd = 1/size
@@ -117,6 +125,7 @@ def test_error_distributions(model_file: str, chkpoint: str, test_data):
     return sq_errors, rank_errors
 
 
+# Classes
 class ModelData:
     """
     Provides access to model meta and checkpoint files by index from a given directory
@@ -185,10 +194,3 @@ class ModelData:
             return self.__data_files[item]
         else:
             raise KeyError("No checkpoint with index {0} found.".format(item))
-
-
-# Constants
-FRAME_RATE = 100  # all simulations, training data models have a native framerate of 100 Hz
-HIST_SECONDS = 4  # all inputs to the models are 4s into the past
-MODEL_RATE = 5    # model input rate is 5 Hz
-PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 500 ms into the future
