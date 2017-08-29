@@ -212,13 +212,13 @@ class GradientSimulation:
         self.mu_trn = np.deg2rad(30)
         self.sd_trn = np.deg2rad(5)
         # set up cashes of random numbers for bout parameters - divisor for disp is for conversion to mm
-        self.__disp_cash = RandCash(1000, lambda s: np.random.gamma(self.disp_k, self.disp_theta, s) / 9)
-        self.__str_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_str + self.mu_str)
-        self.__trn_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_trn + self.mu_trn)
-        self.__uni_cash = RandCash(1000, lambda s: np.random.rand(s))
+        self._disp_cash = RandCash(1000, lambda s: np.random.gamma(self.disp_k, self.disp_theta, s) / 9)
+        self._str_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_str + self.mu_str)
+        self._trn_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_trn + self.mu_trn)
+        self._uni_cash = RandCash(1000, lambda s: np.random.rand(s))
         # place holder to receive bout trajectories for efficiency
-        self.__bout = np.empty((self.blen, 3), np.float32)
-        self.__pos_cache = np.empty((self.nsteps, 3), np.float32)
+        self._bout = np.empty((self.blen, 3), np.float32)
+        self._pos_cache = np.empty((self.nsteps, 3), np.float32)
 
     def temperature(self, r):
         """
@@ -230,7 +230,7 @@ class GradientSimulation:
         """
         With 1/3 probability for each type returns a random bout type
         """
-        dec = self.__uni_cash.next_rand()
+        dec = self._uni_cash.next_rand()
         if dec < 1.0/3:
             return "S"
         elif dec < 2.0/3:
@@ -250,24 +250,24 @@ class GradientSimulation:
             if expected:
                 da = self.mu_str
             else:
-                da = self.__str_cash.next_rand()
+                da = self._str_cash.next_rand()
         elif bout_type == "L":
             if expected:
                 da = -1 * self.mu_trn
             else:
-                da = -1 * self.__trn_cash.next_rand()
+                da = -1 * self._trn_cash.next_rand()
         elif bout_type == "R":
             if expected:
                 da = self.mu_trn
             else:
-                da = self.__trn_cash.next_rand()
+                da = self._trn_cash.next_rand()
         else:
             raise ValueError("bout_type has to be one of S, L, or R")
         heading = start[2] + da
         if expected:
             disp = self.avg_disp
         else:
-            disp = self.__disp_cash.next_rand()
+            disp = self._disp_cash.next_rand()
         dx = np.cos(heading) * disp * self.bfrac
         dy = np.sin(heading) * disp * self.bfrac
         # reflect bout if it would take us outside the dish
@@ -276,10 +276,10 @@ class GradientSimulation:
             heading = heading + np.pi
             dx = np.cos(heading) * disp * self.bfrac
             dy = np.sin(heading) * disp * self.bfrac
-        self.__bout[:, 0] = dx + start[0]
-        self.__bout[:, 1] = dy + start[1]
-        self.__bout[:, 2] = heading
-        return self.__bout
+        self._bout[:, 0] = dx + start[0]
+        self._bout[:, 1] = dy + start[1]
+        self._bout[:, 2] = heading
+        return self._bout
 
     def run_simulation(self):
         """
@@ -298,9 +298,9 @@ class GradientSimulation:
         """
         if start_type not in ["N", "S", "L", "R"]:
             raise ValueError("start_type has to be either (N)o bout, (S)traight, (L)eft or (R)right")
-        if self.__pos_cache.shape[0] != nsteps:
-            self.__pos_cache = np.zeros((nsteps, 3))
-        all_pos = self.__pos_cache
+        if self._pos_cache.shape[0] != nsteps:
+            self._pos_cache = np.zeros((nsteps, 3))
+        all_pos = self._pos_cache
         if start_type == "N":
             all_pos[0, :] = start_pos
             i = 1
@@ -313,7 +313,7 @@ class GradientSimulation:
             else:
                 return traj[:nsteps, :]
         while i < nsteps:
-            dec = self.__uni_cash.next_rand()
+            dec = self._uni_cash.next_rand()
             if dec < self.p_move:
                 bt = self.get_bout_type()
                 traj = self.get_bout_trajectory(all_pos[i - 1, :], bt)
