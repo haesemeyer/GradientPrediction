@@ -22,7 +22,7 @@ class ModelGradSimulation(GradientSimulation):
     """
     Implements a nn-Model based gradient navigation simulation
     """
-    def __init__(self, model_file, chkpoint, tdata, radius, t_min, t_max):
+    def __init__(self, model_file, chkpoint, tdata, radius, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
         :param model_file: The model definition file to use in the simulation (.meta)
@@ -31,10 +31,12 @@ class ModelGradSimulation(GradientSimulation):
         :param radius: The arena radius
         :param t_min: The center temperature
         :param t_max: The edge temperature
+        :param t_preferred: The preferred temperature or None to prefer minimum
         """
         super().__init__(0, radius, t_min, t_max)
         self.model_file = model_file
         self.chkpoint = chkpoint
+        self.t_preferred = t_preferred
         self.temp_mean = tdata.temp_mean
         self.temp_std = tdata.temp_std
         self.disp_mean = tdata.disp_mean
@@ -103,8 +105,13 @@ class ModelGradSimulation(GradientSimulation):
                 model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
                 dang = np.diff(pos[step - history - 1:step, 2], axis=0)
                 model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
-                # to favor behavior towards center put action that results in lowest temperature first
-                behav_ranks = np.argsort(m_out.eval(feed_dict={x_in: model_in, keep_prob: 1.0}).ravel())
+                if self.t_preferred is None:
+                    # to favor behavior towards center put action that results in lowest temperature first
+                    behav_ranks = np.argsort(m_out.eval(feed_dict={x_in: model_in, keep_prob: 1.0}).ravel())
+                else:
+                    model_out = m_out.eval(feed_dict={x_in: model_in, keep_prob: 1.0}).ravel()
+                    proj_diff = np.abs(model_out - (self.t_preferred - self.temp_mean)/self.temp_std)
+                    behav_ranks = np.argsort(proj_diff)
                 bt = self.select_behavior(behav_ranks)
                 if bt == "N":
                     pos[step, :] = pos[step - 1, :]
@@ -144,8 +151,12 @@ class ModelGradSimulation(GradientSimulation):
             for i, b in enumerate(self.btypes):
                 fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
                 t_out[i] = self.temperature(np.sqrt(fpos[0] ** 2 + fpos[1] ** 2))
-            # to favor behavior towards center put action that results in lowest temperature first
-            behav_ranks = np.argsort(t_out).ravel()
+            if self.t_preferred is None:
+                # to favor behavior towards center put action that results in lowest temperature first
+                behav_ranks = np.argsort(t_out).ravel()
+            else:
+                proj_diff = np.abs(t_out - self.t_preferred)
+                behav_ranks = np.argsort(proj_diff).ravel()
             if self._uni_cash.next_rand() < pfail:
                 np.random.shuffle(behav_ranks)
             bt = self.select_behavior(behav_ranks)
@@ -169,6 +180,7 @@ if __name__ == "__main__":
         print("On OSX tkinter likely does not work properly if matplotlib uses a backend that is not TkAgg!")
         print("If using ipython activate TkAgg backend with '%matplotlib tk' and retry.")
         sys.exit(1)
+    TPREFERRED = 25
     root = tk.Tk()
     root.update()
     root.withdraw()
@@ -176,18 +188,34 @@ if __name__ == "__main__":
     model_dir = filedialog.askdirectory(title="Select directory with model checkpoints", initialdir="./model_data/")
     mdata = ModelData(model_dir)
     train_data = GradientData.load("gd_training_data.hdf5")
-    model_sim = ModelGradSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 22, 37)
+    model_sim = ModelGradSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 22, 37, TPREFERRED)
     pos_naive = model_sim.run_simulation(2000000)
-    model_sim = ModelGradSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 22, 37)
+    model_sim = ModelGradSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
     pos_trained = model_sim.run_simulation(2000000)
-    # run an "ideal" simulation but randomizing choice in 50% of cases
-    pos_ideal = model_sim.run_ideal(2000000, 0.5)
+    # run an "ideal" simulation for comparison
+    pos_ideal = model_sim.run_ideal(2000000, 0.0)
     r_naive = np.sqrt(pos_naive[:, 0]**2 + pos_naive[:, 1]**2)
     r_trained = np.sqrt(pos_trained[:, 0]**2 + pos_trained[:, 1]**2)
     r_ideal = np.sqrt(pos_ideal[:, 0]**2 + pos_ideal[:, 1]**2)
+    # generate histograms
+    bins = np.linspace(0, 100, 250)
+    h_naive = np.histogram(r_naive, bins, weights=1.0/r_naive)[0]
+    h_naive /= h_naive.sum()
+    h_trained = np.histogram(r_trained, bins, weights=1.0/r_trained)[0]
+    h_trained /= h_trained.sum()
+    h_ideal = np.histogram(r_ideal, bins, weights=1.0/r_ideal)[0]
+    h_ideal /= h_ideal.sum()
 
     fig, ax = pl.subplots()
-    sns.kdeplot(r_naive, ax=ax)
-    sns.kdeplot(r_trained, ax=ax)
-    sns.kdeplot(r_ideal, ax=ax)
+    bcenters = bins[:-1] + np.diff(bins)/2
+    tbc = model_sim.temperature(bcenters)
+    ax.plot(tbc, h_naive, label="Naive")
+    ax.plot(tbc, h_trained, label="Trained")
+    ax.plot(tbc, h_ideal, label="Ideal choice")
+    if TPREFERRED is not None:
+        max_frac = np.max(np.r_[h_naive, h_trained, h_ideal])
+        ax.plot([TPREFERRED, TPREFERRED], [0, max_frac], 'k--')
+    ax.set_xlabel("Temperature [C]")
+    ax.set_ylabel("Occupancy")
+    ax.legend()
     sns.despine(fig, ax)
