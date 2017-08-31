@@ -213,6 +213,35 @@ class ModelData:
                 except ValueError:
                     continue
                 self.__data_files[num] = dirname + "/" + f[:num_end]
+        self.__input_dims = None
+        self.__n_hidden = None
+
+    def get_input_dims(self):
+        """
+        Returns the number of history frames the network expects in the input
+        """
+        if self.__input_dims is None:
+            with tf.Session():
+                tf.train.import_meta_graph(self.ModelDefinition)
+                graph = tf.get_default_graph()
+                x_in = graph.get_tensor_by_name("x_in:0")
+                self.__input_dims = x_in.shape.as_list()
+        return self.__input_dims.copy()
+
+    def get_n_hidden(self):
+        """
+        Returns the number of hidden layers in the model
+        """
+        if self.__n_hidden is None:
+            with tf.Session():
+                tf.train.import_meta_graph(self.ModelDefinition)
+                graph = tf.get_default_graph()
+                # the number of hidden layers corresponds to the number of Relu operations that
+                # have a name of 3 letters containing h_ (the last two conditions are currently redundant)
+                # this is only true if conventions in mixedInputModel.py are followed
+                self.__n_hidden = len([op for op in graph.get_operations() if op.type == "Relu" and
+                                       len(op.name) == 3 and "h_" in op.name])
+        return self.__n_hidden
 
     @property
     def CheckpointIndices(self):
