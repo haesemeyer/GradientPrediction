@@ -125,6 +125,64 @@ def test_error_distributions(model_file: str, chkpoint: str, test_data):
     return sq_errors, rank_errors
 
 
+def hidden_temperature_responses(model_file: str, chkpoint: str, n_hidden, t_stimulus, t_mean, t_std):
+    """
+    Computes and returns the responses of each hidden unit in the network in response to a temperature stimulus
+    (all other inputs are clamped to 0)
+    :param model_file: The file of the model definitions (.meta)
+    :param chkpoint: The model checkpoint (.ckpt)
+    :param n_hidden: The number of hidden layers in the network
+    :param t_stimulus: The temperature stimulus in C
+    :param t_mean: The average temperature of the stimulus used to train the network
+    :param t_std: The temperature standard deviation of the stimulus used to train the network
+    :return: List with n_hidden elements, each an array of time x n_units activations of hidden units
+    """
+    # TODO: Remove explicit n_hidden parameter and instead retrieve somehow from model
+    history = FRAME_RATE * HIST_SECONDS  # TODO: This should come from the model definition x_in
+    activity = []
+    with tf.Session() as sess:
+        saver = tf.train.import_meta_graph(model_file)
+        saver.restore(sess, chkpoint)
+        graph = tf.get_default_graph()
+        keep_prob = graph.get_tensor_by_name("keep_prob:0")
+        x_in = graph.get_tensor_by_name("x_in:0")
+        ix = indexing_matrix(np.arange(t_stimulus.size), history-1, 0, t_stimulus.size)[0]
+        model_in = np.zeros((ix.shape[0], 3, history, 1))
+        model_in[:, 0, :, 0] = (t_stimulus[ix] - t_mean) / t_std
+        for i in range(n_hidden):
+            h = graph.get_tensor_by_name("h_{0}:0".format(i))
+            activity.append(h.eval(feed_dict={x_in: model_in, keep_prob: 1.0}))
+    return activity
+
+
+def indexing_matrix(triggers: np.ndarray, past: int, future: int, input_length: int):
+    """
+    Builds an indexing matrix from an vector of triggers
+    :param triggers: The elements on which to trigger (timepoint 0)
+    :param past: The number of elements into the past to include
+    :param future: The number of elements into the future to include
+    :param input_length: The total length of the array to eventually index to determine valid triggers
+    :return:
+        [0]: The n_valid_triggers x (past+1+future) trigger matrix
+        [1]: The number of triggers that have been cut out because they would have included indices < 0
+        [2]: The number of triggers that have been cut out because they would have included indices >= input_length
+    """
+    if triggers.ndim > 1:
+        raise ValueError("Triggers has to be 1D vector")
+    to_take = np.r_[-past:future + 1][None, :]
+    t = triggers[:, None]
+    # construct trigger matrix
+    index_mat = np.repeat(t, to_take.size, 1) + np.repeat(to_take, t.size, 0)
+    # identify front and back rows that need to be removed
+    cut_front = np.sum(np.sum(index_mat < 0, 1) > 0, 0)
+    cut_back = np.sum(np.sum(index_mat >= input_length, 1) > 0, 0)
+    # remove out-of-bounds rows
+    if cut_back > 0:
+        return index_mat[cut_front:-cut_back, :].astype(int), cut_front, cut_back
+    else:
+        return index_mat[cut_front:, :].astype(int), cut_front, 0
+
+
 # Classes
 class ModelData:
     """
