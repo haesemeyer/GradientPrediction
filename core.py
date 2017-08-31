@@ -125,23 +125,28 @@ def test_error_distributions(model_file: str, chkpoint: str, test_data):
     return sq_errors, rank_errors
 
 
-def hidden_temperature_responses(model_file: str, chkpoint: str, n_hidden, t_stimulus, t_mean, t_std):
+def hidden_temperature_responses(model, chkpoint, t_stimulus, t_mean, t_std):
     """
     Computes and returns the responses of each hidden unit in the network in response to a temperature stimulus
     (all other inputs are clamped to 0)
-    :param model_file: The file of the model definitions (.meta)
-    :param chkpoint: The model checkpoint (.ckpt)
-    :param n_hidden: The number of hidden layers in the network
+    :param model: ModelData object to describe model
+    :param chkpoint: The model checkpoint (.ckpt) file or index into ModelData
     :param t_stimulus: The temperature stimulus in C
     :param t_mean: The average temperature of the stimulus used to train the network
     :param t_std: The temperature standard deviation of the stimulus used to train the network
     :return: List with n_hidden elements, each an array of time x n_units activations of hidden units
     """
-    # TODO: Remove explicit n_hidden parameter and instead retrieve somehow from model
-    history = FRAME_RATE * HIST_SECONDS  # TODO: This should come from the model definition x_in
+    # if chkpoint is not a string we assume it is meant as index into model - validate
+    if type(chkpoint) != str:
+        if chkpoint not in model:
+            raise ValueError("{0} is not a valid model checkpoint".format(chkpoint))
+        else:
+            chkpoint = model[chkpoint]
+    n_hidden = model.get_n_hidden()
+    history = model.get_input_dims()[2]
     activity = []
     with tf.Session() as sess:
-        saver = tf.train.import_meta_graph(model_file)
+        saver = tf.train.import_meta_graph(model.ModelDefinition)
         saver.restore(sess, chkpoint)
         graph = tf.get_default_graph()
         keep_prob = graph.get_tensor_by_name("keep_prob:0")
