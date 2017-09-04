@@ -189,6 +189,35 @@ def indexing_matrix(triggers: np.ndarray, past: int, future: int, input_length: 
 
 
 # Classes
+class RandCash:
+    """
+    Represents cash of random numbers to draw from
+    """
+    def __init__(self, init_size, f_rand, max_size=10000000):
+        """
+        Creates a new RandCash
+        :param init_size: The initial cash size
+        :param f_rand: The function to obtain random numbers should only take size parameter
+        :param max_size: The maximal size of the cash, defaults to 10e6
+        """
+        self.max_size = max_size
+        self.__cash = f_rand(init_size)
+        self.__cnt = -1
+        self.__f_rand = f_rand
+
+    def next_rand(self):
+        """
+        Returns the next number from the cash
+        """
+        self.__cnt += 1
+        if self.__cnt < self.__cash.size:
+            return self.__cash[self.__cnt]
+        else:
+            self.__cnt = 0
+            self.__cash = self.__f_rand(min(self.__cash.size * 2, self.max_size))
+            return self.__cash[self.__cnt]
+
+
 class ModelData:
     """
     Provides access to model meta and checkpoint files by index from a given directory
