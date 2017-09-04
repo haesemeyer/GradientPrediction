@@ -33,7 +33,7 @@ class ModelGradSimulation(GradientSimulation):
         :param t_max: The edge temperature
         :param t_preferred: The preferred temperature or None to prefer minimum
         """
-        super().__init__(0, radius, t_min, t_max)
+        super().__init__(radius, t_min, t_max)
         self.model_file = model_file
         self.chkpoint = chkpoint
         self.t_preferred = t_preferred

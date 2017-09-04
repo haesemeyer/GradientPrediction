@@ -182,15 +182,13 @@ class GradientSimulation:
     500 ms into the future for each selectable behavior but only one path
     will actually be chosen to advance the simulation to avoid massive branching
     """
-    def __init__(self, nsteps: int, radius, t_min, t_max):
+    def __init__(self, radius, t_min, t_max):
         """
         Creates a new GradientSimulation
-        :param nsteps: The number of steps to perform
         :param radius: The arena radius in mm
         :param t_min: The center temperature
         :param t_max: The edge temperature
         """
-        self.nsteps = nsteps
         self.radius = radius
         self.t_min = t_min
         self.t_max = t_max
@@ -218,7 +216,7 @@ class GradientSimulation:
         self._uni_cash = RandCash(1000, lambda s: np.random.rand(s))
         # place holder to receive bout trajectories for efficiency
         self._bout = np.empty((self.blen, 3), np.float32)
-        self._pos_cache = np.empty((self.nsteps, 3), np.float32)
+        self._pos_cache = np.empty((1, 3), np.float32)
 
     def temperature(self, x, y):
         """
@@ -292,12 +290,13 @@ class GradientSimulation:
         r = np.sqrt(x**2 + y**2)
         return r > self.radius
 
-    def run_simulation(self):
+    def run_simulation(self, nsteps):
         """
         Forward run of random gradient exploration
+        :param nsteps: The number of steps to simulate
         :return: The position and heading in the gradient at each timepoint
         """
-        return self.sim_forward(self.nsteps, np.zeros(3), "N").copy()
+        return self.sim_forward(nsteps, np.zeros(3), "N").copy()
 
     def sim_forward(self, nsteps, start_pos, start_type):
         """
@@ -385,9 +384,9 @@ if __name__ == '__main__':
         response = input("Run simulation with default arena? [y/n]:")
     if response == "y":
         nsteps = int(input("Number of steps to perform?"))
-        gradsim = GradientSimulation(nsteps, 100, 22, 37)
+        gradsim = GradientSimulation(100, 22, 37)
         print("Running gradient simulation")
-        pos = gradsim.run_simulation()
+        pos = gradsim.run_simulation(nsteps)
         pl.figure()
         pl.plot(pos[:, 0], pos[:, 1])
         pl.xlabel("X position [mm]")
