@@ -7,7 +7,7 @@ Script to train gradient navigation model
 """
 
 import tensorflow as tf
-from trainingData import GradientData
+from core import GradientData
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns
