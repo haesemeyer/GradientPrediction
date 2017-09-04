@@ -163,10 +163,6 @@ class GradientSimulation:
         self.radius = radius
         self.t_min = t_min
         self.t_max = t_max
-        # Create 3D array to hold all model inputs derived during the simulation
-        self.model_inputs = np.empty((nsteps, 3, FRAME_RATE*HIST_SECONDS), dtype=np.float32)
-        # Create 2D array to hold all possible final temperatures during the simulation
-        self.Temp_out = np.empty((nsteps, 4), dtype=np.float32)
         # Set bout parameters used in the simulation
         self.p_move = 1.0 / FRAME_RATE  # Bout frequency of 1Hz on average
         self.blen = int(FRAME_RATE * 0.2)  # Bouts happen over 200 ms length
@@ -354,10 +350,10 @@ if __name__ == '__main__':
     while response not in ["y", "n"]:
         response = input("Run simulation with default arena? [y/n]:")
     if response == "y":
-        nsteps = int(input("Number of steps to perform?"))
+        n_steps = int(input("Number of steps to perform?"))
         gradsim = GradientSimulation(100, 22, 37)
         print("Running gradient simulation")
-        pos = gradsim.run_simulation(nsteps)
+        pos = gradsim.run_simulation(n_steps)
         pl.figure()
         pl.plot(pos[:, 0], pos[:, 1])
         pl.xlabel("X position [mm]")
