@@ -99,8 +99,8 @@ class ModelGradSimulation(GradientSimulation):
                     pos[step, :] = pos[step-1, :]
                     step += 1
                     continue
-                r = np.sqrt(np.sum(pos[step - history:step, 0:2] ** 2, 1))
-                model_in[0, 0, :, 0] = (self.temperature(r) - self.temp_mean) / self.temp_std
+                model_in[0, 0, :, 0] = (self.temperature(pos[step - history:step, 0], pos[step - history:step, 1])
+                                        - self.temp_mean) / self.temp_std
                 spd = np.sqrt(np.sum(np.diff(pos[step - history - 1:step, 0:2], axis=0) ** 2, 1))
                 model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
                 dang = np.diff(pos[step - history - 1:step, 2], axis=0)
@@ -150,7 +150,7 @@ class ModelGradSimulation(GradientSimulation):
                 continue
             for i, b in enumerate(self.btypes):
                 fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
-                t_out[i] = self.temperature(np.sqrt(fpos[0] ** 2 + fpos[1] ** 2))
+                t_out[i] = self.temperature(fpos[0], fpos[1])
             if self.t_preferred is None:
                 # to favor behavior towards center put action that results in lowest temperature first
                 behav_ranks = np.argsort(t_out).ravel()
@@ -208,7 +208,7 @@ if __name__ == "__main__":
 
     fig, ax = pl.subplots()
     bcenters = bins[:-1] + np.diff(bins)/2
-    tbc = model_sim.temperature(bcenters)
+    tbc = model_sim.temperature(0, bcenters)
     ax.plot(tbc, h_naive, label="Naive")
     ax.plot(tbc, h_trained, label="Trained")
     ax.plot(tbc, h_ideal, label="Ideal choice")

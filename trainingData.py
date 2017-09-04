@@ -220,10 +220,11 @@ class GradientSimulation:
         self._bout = np.empty((self.blen, 3), np.float32)
         self._pos_cache = np.empty((self.nsteps, 3), np.float32)
 
-    def temperature(self, r):
+    def temperature(self, x, y):
         """
-        Returns the temperature at the given radius
+        Returns the temperature at the given positions
         """
+        r = np.sqrt(x**2 + y**2)  # this is a circular arena so compute radius
         return (r / self.radius) * (self.t_max - self.t_min) + self.t_min
 
     def get_bout_type(self):
@@ -360,8 +361,8 @@ class GradientSimulation:
             if is_moving[step]:
                 continue
             # obtain inputs at given step
-            r = np.sqrt(np.sum(sim_pos[step-history+1:step+1, 0:2]**2, 1))
-            inputs[step-start, 0, :] = self.temperature(r)
+            inputs[step-start, 0, :] = self.temperature(sim_pos[step-history+1:step+1, 0],
+                                                        sim_pos[step-history+1:step+1, 1])
             spd = np.sqrt(np.sum(np.diff(sim_pos[step-history:step+1, 0:2], axis=0)**2, 1))
             inputs[step-start, 1, :] = spd
             inputs[step-start, 2, :] = np.diff(sim_pos[step-history:step+1, 2], axis=0)
@@ -369,7 +370,7 @@ class GradientSimulation:
             # PRED_WINDOW steps into the future to obtain final temperature as output
             for i, b in enumerate(btypes):
                 fpos = self.sim_forward(PRED_WINDOW, sim_pos[step, :], b)[-1, :]
-                outputs[step-start, i] = self.temperature(np.sqrt(fpos[0]**2 + fpos[1]**2))
+                outputs[step-start, i] = self.temperature(fpos[0], fpos[1])
         # create gradient data object on all non-moving positions
         is_moving = is_moving[start:]
         assert is_moving.size == inputs.shape[0]
