@@ -271,8 +271,7 @@ class GradientSimulation:
         dx = np.cos(heading) * disp * self.bfrac
         dy = np.sin(heading) * disp * self.bfrac
         # reflect bout if it would take us outside the dish
-        r_end = np.sqrt((start[0]+dx)**2 + (start[1]+dy)**2)[-1]
-        if r_end > self.radius:
+        if self.out_of_bounds(start[0]+dx[-1], start[1]+dy[-1]):
             heading = heading + np.pi
             dx = np.cos(heading) * disp * self.bfrac
             dy = np.sin(heading) * disp * self.bfrac
@@ -280,6 +279,17 @@ class GradientSimulation:
         self._bout[:, 1] = dy + start[1]
         self._bout[:, 2] = heading
         return self._bout
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        # circular arena, compute radial position of point and compare to arena radius
+        r = np.sqrt(x**2 + y**2)
+        return r > self.radius
 
     def run_simulation(self):
         """
