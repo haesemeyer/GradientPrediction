@@ -686,6 +686,10 @@ class ModelSimulation(TemperatureArena):
         else:
             return self.btypes[ranks[3]]
 
+    @property
+    def max_pos(self):
+        return None
+
     def run_simulation(self, nsteps):
         """
         Runs gradient simulation using the neural network model
