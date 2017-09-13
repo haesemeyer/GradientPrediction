@@ -118,7 +118,7 @@ def run_simulation(simulation: ModelSimulation, n_steps, run_ideal=False, simdir
     :param simdir: Determines whether occupancy should be calculated along (r)adius, (x)- or (y)-axis
     :return:
         [0]: All positions
-        [1]: bin_centers
+        [1]: bin_centers in degree celcius
         [2]: Relative occupancy (corrected if radial)
     """
     if simdir not in ["r", "x", "y"]:
@@ -140,6 +140,10 @@ def run_simulation(simulation: ModelSimulation, n_steps, run_ideal=False, simdir
     if simdir == "r":
         h = h / bin_centers
     h = h / h.sum()
+    if simdir == "r" or simdir == "x":
+        bin_centers = simulation.temperature(bin_centers, np.zeros_like(bin_centers))
+    else:
+        bin_centers = simulation.temperature(np.zeros_like(bin_centers), bin_centers)
     return pos, bin_centers, h
 
 
@@ -179,11 +183,12 @@ if __name__ == "__main__":
     fig, ax = pl.subplots()
     ax.plot(b_naive, h_naive, label="Naive")
     ax.plot(b_trained, h_trained, label="Trained")
-    ax.plot(b_ideal, h_ideal, label="Ideal choice")
+    ax.plot(b_ideal, h_ideal, label="Perfect")
     if TPREFERRED is not None:
         max_frac = np.max(np.r_[h_naive, h_trained, h_ideal])
         ax.plot([TPREFERRED, TPREFERRED], [0, max_frac], 'k--')
     ax.set_xlabel("Temperature [C]")
     ax.set_ylabel("Occupancy")
+    ax.set_ylim(0)
     ax.legend()
     sns.despine(fig, ax)
