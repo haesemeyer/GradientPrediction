@@ -21,6 +21,33 @@ PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 
 
 
 # Functions
+def ca_convolve(trace, ca_timeconstant, frame_rate):
+    """
+    Convolves a trace with a decaying calcium kernel
+    :param trace: The activity trace to convolve
+    :param ca_timeconstant: The timeconstant of the calcium indicator
+    :param frame_rate: The original frame-rate to relate samples to the time constant
+    :return: The convolved trace
+    """
+
+    def ca_kernel(tau, framerate):
+        """
+        Creates a calcium decay kernel for the given frameRate
+        with the given half-life in seconds
+        """
+        fold_length = 5  # make kernel length equal to 5 half-times (decay to 3%)
+        klen = int(fold_length * tau * framerate)
+        tk = np.linspace(0, fold_length * tau, klen, endpoint=False)
+        k = 2 ** (-1 * tk / tau)
+        k = k / k.sum()
+        return k
+
+    if ca_timeconstant == 0:
+        return trace
+    kernel = ca_kernel(ca_timeconstant, frame_rate)
+    return np.convolve(trace, kernel)[:trace.size]
+
+
 def create_weight_var(name, shape, w_decay=None, loss_collection="losses"):
     """
     Creates a weight variable with optional weight decay initialized with sd = 1/size
