@@ -120,7 +120,7 @@ if __name__ == "__main__":
     with h5py.File("./model_data/losses.hdf5", "x") as dfile:
         dfile.create_dataset("train_eval", data=np.arange(len(train_losses)) * EVAL_TRAIN_EVERY)
         dfile.create_dataset("train_losses", data=train_losses)
-        dfile.create_dataset("test_eval", data=len(test_losses) * EVAL_TEST_EVERY)
+        dfile.create_dataset("test_eval", data=np.arange(len(test_losses)) * EVAL_TEST_EVERY)
         dfile.create_dataset("test_losses", data=test_losses)
         dfile.create_dataset("train_rank_errors", data=rank_errors)
         dfile.create_dataset("test_rank_errors", data=test_rank_errors)
