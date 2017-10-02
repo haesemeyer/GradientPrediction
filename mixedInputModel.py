@@ -25,6 +25,14 @@ def create_hidden_layer(name_sfx, prev_out, n_units):
     return w, b, h
 
 
+# TODO: Implement the ability to dynamically remove individual hidden units from the network:
+# 1) For each hidden layer ReLU add a multiplier with a same-sized place-holder active_x to the input calculation:
+#    h = tf.nn.relu(tf.matmul(tf.matmul(prev_out, w)) + b, active_x)
+# 2) Have active_x be all ones during training and standard testing
+# 3) Update active_x to be 0 for all units that should be dropped = their activation will now be forced to 0
+# 4) Perform gradient navigation and standard testing as well as re-training on this "subnetwork"
+
+
 def create_dense_layers(prev_out):
     """
     Creates the dense hidden layers of our model
