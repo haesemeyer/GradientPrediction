@@ -11,17 +11,18 @@ import tensorflow as tf
 import core
 
 
-def create_hidden_layer(name_sfx, prev_out, n_units):
+def create_hidden_layer(name_sfx, prev_out, n_units, index):
     """
     Creates a hidden layer taking in information from another layer
     :param name_sfx: The name suffix to use for this layer
     :param prev_out: The output of the previous layer
     :param n_units: The number of units in the layer
+    :param index: The index of this particular layer for variable association
     :return: weights, biases and layer units of hidden layer
     """
     w = core.create_weight_var("W_h_" + name_sfx, [prev_out.shape[1].value, n_units], WDECAY)
     b = core.create_bias_var("B_h_" + name_sfx, [n_units])
-    h = tf.nn.relu(tf.matmul(prev_out, w) + b, "h_" + name_sfx)
+    h = tf.nn.relu(tf.multiply(tf.matmul(prev_out, w) + b, det_remove[index]), "h_" + name_sfx)
     return w, b, h
 
 
@@ -40,17 +41,17 @@ def create_dense_layers(prev_out):
     :return: weigths, biases, layer units of last dense and list of intermediate layers if any
     """
     if N_HIDDEN < 2:
-        w, b, h = create_hidden_layer("0", prev_out, N_DENSE[0])
+        w, b, h = create_hidden_layer("0", prev_out, N_DENSE[0], 0)
         return w, b, h, []
     else:
         intermediate = []
         drop = prev_out
         for l in range(N_HIDDEN - 1):
-            w, b, h = create_hidden_layer(str(l), drop, N_DENSE[l])
+            w, b, h = create_hidden_layer(str(l), drop, N_DENSE[l], l)
             drop = tf.nn.dropout(h, keep_prob, name="h_drop_" + str(l))
             intermediate.append((w, b, h, drop))
         # last layer
-        w, b, h = create_hidden_layer(str(N_HIDDEN-1), drop, N_DENSE[N_HIDDEN-1])
+        w, b, h = create_hidden_layer(str(N_HIDDEN-1), drop, N_DENSE[N_HIDDEN-1], N_HIDDEN-1)
         return w, b, h, intermediate
 
 
@@ -64,6 +65,29 @@ def create_output(prev_out):
     b = core.create_bias_var("B_o", [4])
     out = tf.add(tf.matmul(prev_out, w), b, name="m_out")
     return w, b, out
+
+
+def name_det_remove(index):
+    """
+    Returns the name of the deterministic removal tensor for the given hidden layer
+    """
+    return "remove_{0}".format(index)
+
+
+def feed_det_remove(feed_dict, values=None):
+    """
+    Adds our deterministic removal variables to the feed dict
+    :param feed_dict: The feedict to which variables should be added
+    :param values: Either None (all 1) or for each layers det_remove the desired multipliers
+    """
+    if values is not None and len(values) != N_HIDDEN:
+        raise ValueError("Values has to be a list with one array for each hidden layer")
+    if values is None:
+        for i in range(N_HIDDEN):
+            feed_dict[det_remove[i]] = np.ones(N_DENSE[i], dtype=np.float32)
+    else:
+        for i in range(N_HIDDEN):
+            feed_dict[det_remove[i]] = values[i]
 
 
 # Hyper parameters of the model
@@ -80,6 +104,10 @@ binned_size = core.FRAME_RATE * core.HIST_SECONDS // t_bin
 
 # dropout probability placeholder
 keep_prob = tf.placeholder(tf.float32, name="keep_prob")
+
+# placeholders for deterministic dropout
+det_remove = [tf.placeholder(tf.float32, shape=ndense, name=name_det_remove(i)) for i, ndense in enumerate(N_DENSE)]
+
 
 # Network structure
 # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
@@ -124,14 +152,14 @@ if __name__ == "__main__":
             xbatch = np.concatenate((xb1, xb2, xb3), 1)
             ybatch = np.c_[np.sum(xb2, axis=(1, 2)), np.sum(xb2 / 4, axis=(1, 2)),
                            np.sum(xb1, axis=(1, 2)), np.sum(xb1 / 2, axis=(1, 2))]
-            cur_l = sq_loss.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})
-            pred = m_out.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})
+            cur_l = sq_loss.eval(feed_dict=feed_det_remove({x_in: xbatch, y_: ybatch, keep_prob: 1.0}))
+            pred = m_out.eval(feed_dict=feed_det_remove({x_in: xbatch, y_: ybatch, keep_prob: 1.0}))
             cur_d = np.median(np.abs((ybatch - pred) / ybatch))
             t_losses.append(cur_l)
             d_fracs.append(cur_d)
             if i % 200 == 0:
                 print('step %d, training loss %g, delta fraction %g' % (i, cur_l, cur_d))
-            t_step.run(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: KEEP_TRAIN})
+            t_step.run(feed_dict=feed_det_remove({x_in: xbatch, y_: ybatch, keep_prob: KEEP_TRAIN}))
         weights_conv1 = W_conv1.eval()
         bias_conv1 = B_conv1.eval()
 
