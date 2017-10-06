@@ -22,16 +22,8 @@ def create_hidden_layer(name_sfx, prev_out, n_units, index):
     """
     w = core.create_weight_var("W_h_" + name_sfx, [prev_out.shape[1].value, n_units], WDECAY)
     b = core.create_bias_var("B_h_" + name_sfx, [n_units])
-    h = tf.nn.relu(tf.multiply(tf.matmul(prev_out, w) + b, det_remove[index]), "h_" + name_sfx)
+    h = tf.nn.relu((tf.matmul(prev_out, w) + b) * det_remove[index], "h_" + name_sfx)
     return w, b, h
-
-
-# TODO: Implement the ability to dynamically remove individual hidden units from the network:
-# 1) For each hidden layer ReLU add a multiplier with a same-sized place-holder active_x to the input calculation:
-#    h = tf.nn.relu(tf.matmul(tf.matmul(prev_out, w)) + b, active_x)
-# 2) Have active_x be all ones during training and standard testing
-# 3) Update active_x to be 0 for all units that should be dropped = their activation will now be forced to 0
-# 4) Perform gradient navigation and standard testing as well as re-training on this "subnetwork"
 
 
 def create_dense_layers(prev_out):
@@ -88,6 +80,7 @@ def feed_det_remove(feed_dict, values=None):
     else:
         for i in range(N_HIDDEN):
             feed_dict[det_remove[i]] = values[i]
+    return feed_dict
 
 
 # Hyper parameters of the model
@@ -106,7 +99,7 @@ binned_size = core.FRAME_RATE * core.HIST_SECONDS // t_bin
 keep_prob = tf.placeholder(tf.float32, name="keep_prob")
 
 # placeholders for deterministic dropout
-det_remove = [tf.placeholder(tf.float32, shape=ndense, name=name_det_remove(i)) for i, ndense in enumerate(N_DENSE)]
+det_remove = [tf.placeholder(tf.float32, shape=[ndense], name=name_det_remove(i)) for i, ndense in enumerate(N_DENSE)]
 
 
 # Network structure
