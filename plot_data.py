@@ -13,6 +13,7 @@ from scipy.ndimage import gaussian_filter1d
 import matplotlib.pyplot as pl
 import seaborn as sns
 from gradientSimulation import run_simulation, CircleGradSimulation, LinearGradientSimulation
+from core import ModelData, GradientData
 
 
 # file definitions
@@ -31,10 +32,17 @@ paths_512 = [
     "170906_512_512_512/",
     "170907_512_512_512/"
 ]
+# simulation globals
+n_steps = 2000000
+TPREFERRED = 25
 
 
 def loss_file(path):
     return base_path + path + "losses.hdf5"
+
+
+def mpath(path):
+    return base_path + path[:-1]  # need to remove trailing slash
 
 
 def train_loss(fname):
@@ -95,7 +103,63 @@ def plot_rank_losses():
     sns.despine()
 
 
+def do_simulation(path, train_data, sim_type, run_ideal):
+    mdata = ModelData(path)
+    if sim_type == "l":
+        sim_type = "x"
+        sim_naive = LinearGradientSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37,
+                                             TPREFERRED)
+        sim_trained = LinearGradientSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 100, 22,
+                                               37, TPREFERRED)
+    else:
+        sim_naive = CircleGradSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 22, 37,
+                                         TPREFERRED)
+        sim_trained = CircleGradSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 22, 37,
+                                           TPREFERRED)
+    b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
+    b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
+    if run_ideal:
+        b_ideal, h_ideal = run_simulation(sim_trained, n_steps, True, sim_type)[1:]
+        return b_naive, h_naive, h_trained, h_ideal
+    else:
+        return b_naive, h_naive, h_trained
+
+
+def plot_sim(train_data, sim_type):
+    all_n = []
+    bins, n_256, t_256, ideal = do_simulation(mpath(path_256), train_data, sim_type, True)
+    all_n.append(n_256)
+    t_512 = []
+    for p in paths_512:
+        _, n, t = do_simulation(mpath(p), train_data, sim_type, False)
+        all_n.append(n)
+        t_512.append(t)
+    t_512 = np.mean(np.vstack(t_512), 0)
+    _, n_1024, t_1024 = do_simulation(mpath(path_1024), train_data, sim_type, False)
+    all_n.append(n_1024)
+    _, n_2048, t_2048 = do_simulation(mpath(path_2048), train_data, sim_type, False)
+    all_n.append(n_2048)
+    all_n = np.mean(np.vstack(all_n), 0)
+    fig, ax = pl.subplots()
+    ax.plot(bins, t_256, lw=2, label="256 HU")
+    ax.plot(bins, t_512, lw=2, label="512 HU")
+    ax.plot(bins, t_1024, lw=2, label="1024 HU")
+    ax.plot(bins, t_2048, lw=2, label="2048 HU")
+    ax.plot(bins, all_n, "k", lw=2, label="Naive")
+    ax.plot(bins, ideal, "k--", label="Ideal")
+    ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'C4--')
+    ax.set_ylim(0)
+    ax.legend()
+    ax.set_ylabel("Proportion")
+    ax.set_xlabel("Temperature")
+    sns.despine(fig, ax)
+
+
 if __name__ == "__main__":
     # plot training progress
     plot_squared_losses()
     plot_rank_losses()
+    # load training data for scaling
+    tdata = GradientData.load("gd_training_data.hdf5")
+    # plot radial sim results
+    plot_sim(tdata, "r")
