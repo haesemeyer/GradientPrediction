@@ -9,6 +9,7 @@ temperature variables on which convolution filters operate jointly
 
 import tensorflow as tf
 import core
+import numpy as np
 
 
 def create_hidden_layer(name_sfx, prev_out, n_units, index):
@@ -83,6 +84,21 @@ def feed_det_remove(feed_dict, values=None):
     return feed_dict
 
 
+def create_feed_dict(x_vals, y_vals=None, keep=1.0, removal=None):
+    """
+    Creates a feed dictionary for the network model
+    :param x_vals: The network input
+    :param y_vals: The true output
+    :param keep: The probability of keeping a unit in drop-out
+    :param removal: List of deterministic removal vectors - for each element 0=remove, 1=keep
+    :return: The model feeding dictionary
+    """
+    f_dict = {x_in: x_vals, keep_prob: keep}
+    if y_vals is not None:
+        f_dict[y_] = y_vals
+    return feed_det_remove(f_dict, removal)
+
+
 # Hyper parameters of the model
 N_CONV_LAYERS = 40  # the number of convolution filters
 N_DENSE = [512, 512, 512]  # the number of units in each hidden layer
@@ -127,7 +143,6 @@ total_loss, sq_loss = core.get_loss(y_, m_out)
 t_step = core.create_train_step(total_loss)
 
 if __name__ == "__main__":
-    import numpy as np
     import matplotlib.pyplot as pl
     import seaborn as sns
     from scipy.ndimage import gaussian_filter1d
@@ -145,14 +160,18 @@ if __name__ == "__main__":
             xbatch = np.concatenate((xb1, xb2, xb3), 1)
             ybatch = np.c_[np.sum(xb2, axis=(1, 2)), np.sum(xb2 / 4, axis=(1, 2)),
                            np.sum(xb1, axis=(1, 2)), np.sum(xb1 / 2, axis=(1, 2))]
-            cur_l = sq_loss.eval(feed_dict=feed_det_remove({x_in: xbatch, y_: ybatch, keep_prob: 1.0}))
-            pred = m_out.eval(feed_dict=feed_det_remove({x_in: xbatch, y_: ybatch, keep_prob: 1.0}))
+            # create feedict appropriate for evaluations
+            fdict = create_feed_dict(xbatch, ybatch, 1.0)
+            cur_l = sq_loss.eval(feed_dict=fdict)
+            pred = m_out.eval(feed_dict=fdict)
             cur_d = np.median(np.abs((ybatch - pred) / ybatch))
             t_losses.append(cur_l)
             d_fracs.append(cur_d)
             if i % 200 == 0:
                 print('step %d, training loss %g, delta fraction %g' % (i, cur_l, cur_d))
-            t_step.run(feed_dict=feed_det_remove({x_in: xbatch, y_: ybatch, keep_prob: KEEP_TRAIN}))
+            # create feedict appropriate for *training*
+            fdict = create_feed_dict(xbatch, ybatch, KEEP_TRAIN)
+            t_step.run(feed_dict=fdict)
         weights_conv1 = W_conv1.eval()
         bias_conv1 = B_conv1.eval()
 
