@@ -727,6 +727,8 @@ class ModelSimulation(TemperatureArena):
         :return: The feeding dictionary for this model interation
         """
         fd = {x_in: xvals, keep_prob: 1.0}
+        if det_remove is None:
+            return fd
         # TODO: Allow for class member indicating removal of units
         for dr in det_remove:
             fd[dr] = np.ones(dr.shape.as_list()[0])
@@ -755,7 +757,11 @@ class ModelSimulation(TemperatureArena):
             # obtain list of deterministic removal placeholders
             # TODO: Instead of recreating ModelData from directory maybe have ModelData be stored instead of dir
             n_hidden = ModelData(os.path.dirname(self.model_file)).get_n_hidden()
-            det_remove = [graph.get_tensor_by_name("remove_{0}:0".format(i)) for i in range(n_hidden)]
+            try:
+                det_remove = [graph.get_tensor_by_name("remove_{0}:0".format(i)) for i in range(n_hidden)]
+            except KeyError:
+                # this model was saved before adding deterministic removal of units
+                det_remove = None
             # start simulation
             step = start
             model_in = np.zeros((1, 3, history, 1))
