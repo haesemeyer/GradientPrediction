@@ -717,6 +717,21 @@ class ModelSimulation(TemperatureArena):
     def max_pos(self):
         return None
 
+    def create_feed_dict(self, x_in, xvals, det_remove, keep_prob):
+        """
+        Creates a feeding dictionary for our model
+        :param x_in: Model variable of model inputs
+        :param xvals: The actual input values
+        :param det_remove: List of model tensors for deterministic removal
+        :param keep_prob: Model tensor of dropout probability
+        :return: The feeding dictionary for this model interation
+        """
+        fd = {x_in: xvals, keep_prob: 1.0}
+        # TODO: Allow for class member indicating removal of units
+        for dr in det_remove:
+            fd[dr] = np.ones(dr.shape.as_list()[0])
+        return fd
+
     def run_simulation(self, nsteps):
         """
         Runs gradient simulation using the neural network model
@@ -737,6 +752,11 @@ class ModelSimulation(TemperatureArena):
             m_out = graph.get_tensor_by_name("m_out:0")
             x_in = graph.get_tensor_by_name("x_in:0")
             keep_prob = graph.get_tensor_by_name("keep_prob:0")
+            # obtain list of deterministic removal placeholders
+            # TODO: Instead of recreating ModelData from directory maybe have ModelData be stored instead of dir
+            n_hidden = ModelData(os.path.dirname(self.model_file)).get_n_hidden()
+            det_remove = [graph.get_tensor_by_name("remove_{0}:0".format(i)) for i in range(n_hidden)]
+            # start simulation
             step = start
             model_in = np.zeros((1, 3, history, 1))
             # overall bout frequency at ~1 Hz
@@ -752,11 +772,12 @@ class ModelSimulation(TemperatureArena):
                 model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
                 dang = np.diff(pos[step - history - 1:step, 2], axis=0)
                 model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
+                fd = self.create_feed_dict(x_in, model_in, det_remove, keep_prob)
                 if self.t_preferred is None:
                     # to favor behavior towards center put action that results in lowest temperature first
-                    behav_ranks = np.argsort(m_out.eval(feed_dict={x_in: model_in, keep_prob: 1.0}).ravel())
+                    behav_ranks = np.argsort(m_out.eval(feed_dict=fd).ravel())
                 else:
-                    model_out = m_out.eval(feed_dict={x_in: model_in, keep_prob: 1.0}).ravel()
+                    model_out = m_out.eval(feed_dict=fd).ravel()
                     proj_diff = np.abs(model_out - (self.t_preferred - self.temp_mean)/self.temp_std)
                     behav_ranks = np.argsort(proj_diff)
                 bt = self.select_behavior(behav_ranks)
