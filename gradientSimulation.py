@@ -20,10 +20,10 @@ class CircleGradSimulation(ModelSimulation):
     """
     Implements a nn-Model based gradient navigation simulation
     """
-    def __init__(self, model_file, chkpoint, tdata, radius, t_min, t_max, t_preferred=None):
+    def __init__(self, model: ModelData, chkpoint, tdata, radius, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
-        :param model_file: The model definition file to use in the simulation (.meta)
+        :param model: The ModelData describing our network model
         :param chkpoint: The model checkpoint containing the trained data (.ckpt)
         :param tdata: Object that cotains training normalizations of model inputs
         :param radius: The arena radius
@@ -31,7 +31,7 @@ class CircleGradSimulation(ModelSimulation):
         :param t_max: The edge temperature
         :param t_preferred: The preferred temperature or None to prefer minimum
         """
-        super().__init__(model_file, chkpoint, tdata, t_preferred)
+        super().__init__(model, chkpoint, tdata, t_preferred)
         self.radius = radius
         self.t_min = t_min
         self.t_max = t_max
@@ -65,10 +65,10 @@ class LinearGradientSimulation(ModelSimulation):
     """
     Implements a nn-Model based linear gradient navigation simulation
     """
-    def __init__(self, model_file, chkpoint, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
+    def __init__(self, model, chkpoint, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
-        :param model_file: The model definition file to use in the simulation (.meta)
+        :param model: The ModelData describing our network model
         :param chkpoint: The model checkpoint containing the trained data (.ckpt)
         :param tdata: Object that cotains training normalizations of model inputs
         :param xmax: The maximum x-position (gradient direction)
@@ -77,7 +77,7 @@ class LinearGradientSimulation(ModelSimulation):
         :param t_max: The x=xmax temperature
         :param t_preferred: The preferred temperature or None to prefer minimum
         """
-        super().__init__(model_file, chkpoint, tdata, t_preferred)
+        super().__init__(model, chkpoint, tdata, t_preferred)
         self.xmax = xmax
         self.ymax = ymax
         self.t_min = t_min
@@ -167,14 +167,14 @@ if __name__ == "__main__":
         sim_type = input("Please select either (l)inear or (r)adial simulation [l/r]:")
     if sim_type == "l":
         sim_type = "x"  # so we call run_simulation correctly later
-        sim_naive = LinearGradientSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37,
+        sim_naive = LinearGradientSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37,
                                              TPREFERRED)
-        sim_trained = LinearGradientSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 100, 22,
+        sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22,
                                                37, TPREFERRED)
     else:
-        sim_naive = CircleGradSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 22, 37,
+        sim_naive = CircleGradSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 22, 37,
                                          TPREFERRED)
-        sim_trained = CircleGradSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 22, 37,
+        sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37,
                                            TPREFERRED)
     b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
     b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]

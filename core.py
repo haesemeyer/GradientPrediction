@@ -676,9 +676,16 @@ class ModelSimulation(TemperatureArena):
     Base class for simulations that use trained networks
     to perform gradient navigation
     """
-    def __init__(self, model_file, chkpoint, tdata, t_preferred):
+    def __init__(self, model: ModelData, chkpoint, tdata, t_preferred):
+        """
+        Creates a new ModelSimulation
+        :param model: The ModelData describing our network model
+        :param chkpoint: The desired checkpoint file to use for the simulation
+        :param tdata: Training data or related object to supply scaling information
+        :param t_preferred: The preferred temperature that should be reached during the simulation
+        """
         super().__init__()
-        self.model_file = model_file
+        self.model = model
         self.chkpoint = chkpoint
         self.t_preferred = t_preferred
         self.temp_mean = tdata.temp_mean
@@ -719,6 +726,10 @@ class ModelSimulation(TemperatureArena):
     @property
     def max_pos(self):
         return None
+
+    @property
+    def model_file(self):
+        return self.model.ModelDefinition
 
     def create_feed_dict(self, x_in, xvals, det_remove, keep_prob):
         """
@@ -766,8 +777,7 @@ class ModelSimulation(TemperatureArena):
             x_in = graph.get_tensor_by_name("x_in:0")
             keep_prob = graph.get_tensor_by_name("keep_prob:0")
             # obtain list of deterministic removal placeholders
-            # TODO: Instead of recreating ModelData from directory maybe have ModelData be stored instead of dir
-            n_hidden = ModelData(os.path.dirname(self.model_file)).get_n_hidden()
+            n_hidden = self.model.get_n_hidden()
             try:
                 det_remove = [graph.get_tensor_by_name("remove_{0}:0".format(i)) for i in range(n_hidden)]
             except KeyError:
