@@ -688,7 +688,10 @@ class ModelSimulation(TemperatureArena):
         self.ang_mean = tdata.ang_mean
         self.ang_std = tdata.ang_std
         self.btypes = ["N", "S", "L", "R"]
+        # all starting positions have to be within bounds but x and y coordinates are further limted to +/- maxstart
         self.maxstart = 10
+        # optionally holds a list of vectors to suppress activation in units that should be "ablated"
+        self.remove = None
 
     def get_start_pos(self):
         x = np.inf
@@ -729,9 +732,17 @@ class ModelSimulation(TemperatureArena):
         fd = {x_in: xvals, keep_prob: 1.0}
         if det_remove is None:
             return fd
-        # TODO: Allow for class member indicating removal of units
-        for dr in det_remove:
-            fd[dr] = np.ones(dr.shape.as_list()[0])
+        if self.remove is None:
+            for dr in det_remove:
+                fd[dr] = np.ones(dr.shape.as_list()[0])
+        else:
+            if len(det_remove) != len(self.remove):
+                raise ValueError("self.remove has a different amount of elements than hidden network layers")
+            for i, dr in enumerate(det_remove):
+                if self.remove[i].size == dr.shape.as_list()[0]:
+                    fd[dr] = self.remove[i]
+                else:
+                    raise ValueError("All elements of self.remove need to comply with hidden layer sizes")
         return fd
 
     def run_simulation(self, nsteps):
