@@ -52,9 +52,10 @@ if __name__ == "__main__":
             ybatch = batch_data[1]
             # every five steps compute training losses
             if i % EVAL_TRAIN_EVERY == 0:
-                cur_l = mIM.sq_loss.eval(feed_dict={mIM.x_in: xbatch, mIM.y_: ybatch, mIM.keep_prob: 1.0})
+                fd = mIM.create_feed_dict(xbatch, ybatch, 1.0)
+                cur_l = mIM.sq_loss.eval(feed_dict=fd)
                 # compare ranks of options in prediction vs. ranks of real options
-                pred = mIM.m_out.eval(feed_dict={mIM.x_in: xbatch, mIM.y_: ybatch, mIM.keep_prob: 1.0})
+                pred = mIM.m_out.eval(feed_dict=fd)
                 sum_rank_diffs = 0.0
                 for elem in range(BATCHSIZE):
                     rank_real = np.unique(ybatch[elem, :], return_inverse=True)[1]
@@ -70,8 +71,9 @@ if __name__ == "__main__":
                 test = testData.training_batch(TESTSIZE)
                 xtest = test[0]
                 ytest = test[1]
-                cur_l = mIM.sq_loss.eval(feed_dict={mIM.x_in: xtest, mIM.y_: ytest, mIM.keep_prob: 1.0})
-                pred_test = mIM.m_out.eval(feed_dict={mIM.x_in: xtest, mIM.y_: ytest, mIM.keep_prob: 1.0})
+                fd = mIM.create_feed_dict(xtest, ytest, 1.0)
+                cur_l = mIM.sq_loss.eval(feed_dict=fd)
+                pred_test = mIM.m_out.eval(feed_dict=fd)
                 sum_rank_diffs = 0.0
                 for elem in range(TESTSIZE):
                     rank_real = np.unique(ytest[elem, :], return_inverse=True)[1]
@@ -82,8 +84,9 @@ if __name__ == "__main__":
                 print("TEST")
                 test_losses.append(cur_l)
                 test_rank_errors.append(sum_rank_diffs / TESTSIZE)
-
-            mIM.t_step.run(feed_dict={mIM.x_in: xbatch, mIM.y_: ybatch, mIM.keep_prob: mIM.KEEP_TRAIN})
+            # create training feed dict
+            fd = mIM.create_feed_dict(xbatch, ybatch, mIM.KEEP_TRAIN)
+            mIM.t_step.run(feed_dict=fd)
         # save final progress
         save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=n_train, write_meta_graph=False)
         print("Final model saved in file: %s" % save_path)
