@@ -173,6 +173,7 @@ def hidden_temperature_responses(model, chkpoint, t_stimulus, t_mean, t_std):
     n_hidden = model.get_n_hidden()
     history = model.get_input_dims()[2]
     activity = []
+    tf.reset_default_graph()
     with tf.Session() as sess:
         saver = tf.train.import_meta_graph(model.ModelDefinition)
         saver.restore(sess, chkpoint)
