@@ -185,7 +185,15 @@ def hidden_temperature_responses(model, chkpoint, t_stimulus, t_mean, t_std):
         model_in[:, 0, :, 0] = (t_stimulus[ix] - t_mean) / t_std
         for i in range(n_hidden):
             h = graph.get_tensor_by_name("h_{0}:0".format(i))
-            activity.append(h.eval(feed_dict={x_in: model_in, keep_prob: 1.0}))
+            fd = {x_in: model_in, keep_prob: 1.0}
+            # Add det remove to feed dict where appropriate
+            try:
+                for j in range(n_hidden):
+                    dr = graph.get_tensor_by_name("remove_{0}:0".format(j))
+                    fd[dr] = np.ones(dr.shape.as_list()[0])
+            except KeyError:
+                pass
+            activity.append(h.eval(feed_dict=fd))
     return activity
 
 
