@@ -285,7 +285,7 @@ class ModelData:
                     continue
                 self.__data_files[num] = dirname + "/" + f[:num_end]
         self.__input_dims = None
-        self.__n_hidden = None
+        self._hidden_sizes = None
 
     def get_input_dims(self):
         """
@@ -303,16 +303,24 @@ class ModelData:
         """
         Returns the number of hidden layers in the model
         """
-        if self.__n_hidden is None:
+        return len(self.get_hidden_sizes())
+
+    def get_hidden_sizes(self):
+        """
+        Returns the number of units in each hidden layer of the network
+        """
+        if self._hidden_sizes is None:
+            tf.reset_default_graph()
             with tf.Session():
                 tf.train.import_meta_graph(self.ModelDefinition)
                 graph = tf.get_default_graph()
-                # the number of hidden layers corresponds to the number of Relu operations that
-                # have a name of 3 letters containing h_ (the last two conditions are currently redundant)
-                # this is only true if conventions in mixedInputModel.py are followed
-                self.__n_hidden = len([op for op in graph.get_operations() if op.type == "Relu" and
-                                       len(op.name) == 3 and "h_" in op.name])
-        return self.__n_hidden
+                # we use the same strategy as above to identify the operations belonging to our hidden layers
+                # then we access the corresponding tensor and it's shape in position 1 will be the number of hidden
+                # units
+                self._hidden_sizes = [graph.get_tensor_by_name(op.name+":0").shape.as_list()[1] for op in
+                                      graph.get_operations() if op.type == "Relu" and len(op.name) == 3 and "h_" in
+                                      op.name]
+        return self._hidden_sizes
 
     @property
     def CheckpointIndices(self):
