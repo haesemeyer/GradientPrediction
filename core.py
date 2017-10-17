@@ -292,8 +292,15 @@ class ModelData:
         Returns the number of history frames the network expects in the input
         """
         if self.__input_dims is None:
-            with tf.Session():
-                tf.train.import_meta_graph(self.ModelDefinition)
+            # first check if a session is already open otherwise open new one
+            if tf.get_default_session() is None:
+                tf.reset_default_graph()
+                with tf.Session():
+                    tf.train.import_meta_graph(self.ModelDefinition)
+                    graph = tf.get_default_graph()
+                    x_in = graph.get_tensor_by_name("x_in:0")
+                    self.__input_dims = x_in.shape.as_list()
+            else:
                 graph = tf.get_default_graph()
                 x_in = graph.get_tensor_by_name("x_in:0")
                 self.__input_dims = x_in.shape.as_list()
@@ -310,14 +317,21 @@ class ModelData:
         Returns the number of units in each hidden layer of the network
         """
         if self._hidden_sizes is None:
-            tf.reset_default_graph()
-            with tf.Session():
-                tf.train.import_meta_graph(self.ModelDefinition)
+            # first check if a session is already open otherwise open new one
+            if tf.get_default_session() is None:
+                tf.reset_default_graph()
+                with tf.Session():
+                    tf.train.import_meta_graph(self.ModelDefinition)
+                    graph = tf.get_default_graph()
+                    # we use the same strategy as above to identify the operations belonging to our hidden layers
+                    # then we access the corresponding tensor and it's shape in position 1 will be the number of hidden
+                    # units
+                    self._hidden_sizes = [graph.get_tensor_by_name(op.name+":0").shape.as_list()[1] for op in
+                                          graph.get_operations() if op.type == "Relu" and len(op.name) == 3 and "h_" in
+                                          op.name]
+            else:
                 graph = tf.get_default_graph()
-                # we use the same strategy as above to identify the operations belonging to our hidden layers
-                # then we access the corresponding tensor and it's shape in position 1 will be the number of hidden
-                # units
-                self._hidden_sizes = [graph.get_tensor_by_name(op.name+":0").shape.as_list()[1] for op in
+                self._hidden_sizes = [graph.get_tensor_by_name(op.name + ":0").shape.as_list()[1] for op in
                                       graph.get_operations() if op.type == "Relu" and len(op.name) == 3 and "h_" in
                                       op.name]
         return self._hidden_sizes
