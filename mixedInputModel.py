@@ -23,7 +23,8 @@ def create_hidden_layer(name_sfx, prev_out, n_units, index):
     """
     w = core.create_weight_var("W_h_" + name_sfx, [prev_out.shape[1].value, n_units], WDECAY)
     b = core.create_bias_var("B_h_" + name_sfx, [n_units])
-    h = tf.nn.relu((tf.matmul(prev_out, w) + b) * det_remove[index], "h_" + name_sfx)
+    scale = n_units / tf.reduce_sum(det_remove[index])
+    h = tf.nn.relu((tf.matmul(prev_out, w) + b) * det_remove[index] * scale, "h_" + name_sfx)
     return w, b, h
 
 
