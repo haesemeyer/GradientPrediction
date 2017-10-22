@@ -787,12 +787,20 @@ class ModelSimulation(TemperatureArena):
                     raise ValueError("All elements of self.remove need to comply with hidden layer sizes")
         return fd
 
-    def run_simulation(self, nsteps):
+    def run_simulation(self, nsteps, debug=False):
         """
         Runs gradient simulation using the neural network model
         :param nsteps: The number of timesteps to perform
-        :return: nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
+        :param debug: If set to true function will return debug output
+        :return:
+            [0] nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
+            [1] Returned if debug=True. Dictionary with vector of temps and matrix of predictions at each position
         """
+        debug_dict = {}
+        if debug:
+            debug_dict["curr_temp"] = np.full(nsteps, np.nan)
+            debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)
+            debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")
         history = FRAME_RATE * HIST_SECONDS
         burn_period = history * 2
         start = history + 1
@@ -831,14 +839,19 @@ class ModelSimulation(TemperatureArena):
                 dang = np.diff(pos[step - history - 1:step, 2], axis=0)
                 model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
                 fd = self.create_feed_dict(x_in, model_in, det_remove, keep_prob)
+                model_out = m_out.eval(feed_dict=fd).ravel()
                 if self.t_preferred is None:
                     # to favor behavior towards center put action that results in lowest temperature first
-                    behav_ranks = np.argsort(m_out.eval(feed_dict=fd).ravel())
+                    behav_ranks = np.argsort(model_out)
                 else:
-                    model_out = m_out.eval(feed_dict=fd).ravel()
                     proj_diff = np.abs(model_out - (self.t_preferred - self.temp_mean)/self.temp_std)
                     behav_ranks = np.argsort(proj_diff)
                 bt = self.select_behavior(behav_ranks)
+                if debug:
+                    dbpos = step - burn_period
+                    debug_dict["curr_temp"][dbpos] = model_in[0, 0, -1, 0] * self.temp_std + self.temp_mean
+                    debug_dict["pred_temp"][dbpos, :] = model_out * self.temp_std + self.temp_mean
+                    debug_dict["sel_behav"][dbpos] = bt
                 if bt == "N":
                     pos[step, :] = pos[step - 1, :]
                     step += 1
@@ -849,7 +862,8 @@ class ModelSimulation(TemperatureArena):
                 else:
                     pos[step:, :] = traj[:pos[step:, :].shape[0], :]
                 step += self.blen
-
+        if debug:
+            return pos[burn_period:, :], debug_dict
         return pos[burn_period:, :]
 
     def run_ideal(self, nsteps, pfail=0.0):
