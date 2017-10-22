@@ -797,10 +797,13 @@ class ModelSimulation(TemperatureArena):
             [1] Returned if debug=True. Dictionary with vector of temps and matrix of predictions at each position
         """
         debug_dict = {}
+        t_out = np.zeros(4)  # for debug purposes to run true outcome simulations forward
         if debug:
-            debug_dict["curr_temp"] = np.full(nsteps, np.nan)
-            debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)
-            debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")
+            # debug dict only contains information for timesteps which were select for possible movement!
+            debug_dict["curr_temp"] = np.full(nsteps, np.nan)  # the current temperature at this position
+            debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)  # the network predicted temperature for each move
+            debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")  # the actually selected move
+            debug_dict["true_temp"] = np.full((nsteps, 4), np.nan)  # the temperature if each move is simulated
         history = FRAME_RATE * HIST_SECONDS
         burn_period = history * 2
         start = history + 1
@@ -852,6 +855,10 @@ class ModelSimulation(TemperatureArena):
                     debug_dict["curr_temp"][dbpos] = model_in[0, 0, -1, 0] * self.temp_std + self.temp_mean
                     debug_dict["pred_temp"][dbpos, :] = model_out * self.temp_std + self.temp_mean
                     debug_dict["sel_behav"][dbpos] = bt
+                    for i, b in enumerate(self.btypes):
+                        fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                        t_out[i] = self.temperature(fpos[0], fpos[1])
+                    debug_dict["true_temp"][dbpos, :] = t_out
                 if bt == "N":
                     pos[step, :] = pos[step - 1, :]
                     step += 1
