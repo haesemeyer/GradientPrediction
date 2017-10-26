@@ -10,10 +10,14 @@ trained neural networks - this script is very data-set specific
 import h5py
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
+from scipy.stats import linregress
 import matplotlib.pyplot as pl
 import seaborn as sns
+from mpl_toolkits.mplot3d import Axes3D
 from gradientSimulation import run_simulation, CircleGradSimulation, LinearGradientSimulation
-from core import ModelData, GradientData
+from core import ModelData, GradientData, hidden_temperature_responses, FRAME_RATE, ca_convolve
+from analyzeTempResponses import trial_average, cluster_responses
+import os
 
 
 # file definitions
@@ -22,19 +26,10 @@ base_path = "./model_data/Adam_1e-4/"
 path_256 = "170829_NH_256_256_256/"
 path_1024 = "170829_NH_1024_1024_1024/"
 path_2048 = "170829_NH_2048_2048_2048/"
-paths_512 = [
-    "170829_NH_512_512_512/",
-    "170901_512_512_512/",
-    "170902_512_512_512/",
-    "170903_512_512_512/",
-    "170904_512_512_512/",
-    "170905_512_512_512/",
-    "170906_512_512_512/",
-    "170907_512_512_512/"
-]
+paths_512 = [f+'/' for f in os.listdir(base_path) if "512_512_512" in f]
 # simulation globals
 n_steps = 2000000
-TPREFERRED = 25
+TPREFERRED = 29.5
 
 
 def loss_file(path):
@@ -103,41 +98,60 @@ def plot_rank_losses():
     sns.despine()
 
 
-def do_simulation(path, train_data, sim_type, run_ideal):
+def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
+    """
+    Uses a model identified by path to run a naive and a trained and optionally an ideal and unit dropped simulation
+    :param path: The model path
+    :param train_data: The train_data or equivalent object to provide temperature scaling information
+    :param sim_type: The simulation type to run
+    :param run_ideal: If true, an ideal choice simulation will be run as well
+    :param drop_list: If not none should be a list that will be fed to det_drop to determine which units are kept (1)
+        or dropped (0)
+    :return:
+        [0]: The occupancy bins
+        [1]: The occupancy of the naive model
+        [2]: The occupancey of the trained model
+        [3]: The occupancy of the ideal choice model if run_ideal=True, None otherwise
+        [4]: The occupancy of a unit dropped model if drop_list is provided, None otherwise
+    """
     mdata = ModelData(path)
     if sim_type == "l":
         sim_type = "x"
-        sim_naive = LinearGradientSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37,
-                                             TPREFERRED)
-        sim_trained = LinearGradientSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 100, 22,
-                                               37, TPREFERRED)
+        sim_naive = LinearGradientSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+        sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+        if drop_list is not None:
+            sim_drop = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_drop.remove = drop_list
     else:
-        sim_naive = CircleGradSimulation(mdata.ModelDefinition, mdata.FirstCheckpoint, train_data, 100, 22, 37,
-                                         TPREFERRED)
-        sim_trained = CircleGradSimulation(mdata.ModelDefinition, mdata.LastCheckpoint, train_data, 100, 22, 37,
-                                           TPREFERRED)
+        sim_naive = CircleGradSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+        sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+        if drop_list is not None:
+            sim_drop = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_drop.remove = drop_list
     b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
     b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
+    h_ideal = None
+    h_drop = None
     if run_ideal:
         b_ideal, h_ideal = run_simulation(sim_trained, n_steps, True, sim_type)[1:]
-        return b_naive, h_naive, h_trained, h_ideal
-    else:
-        return b_naive, h_naive, h_trained
+    if drop_list is not None:
+        b_drop, h_drop = run_simulation(sim_drop, n_steps, False, sim_type)[1:]
+    return b_naive, h_naive, h_trained, h_ideal, h_drop
 
 
 def plot_sim(train_data, sim_type):
     all_n = []
-    bins, n_256, t_256, ideal = do_simulation(mpath(path_256), train_data, sim_type, True)
+    bins, n_256, t_256, ideal = do_simulation(mpath(path_256), train_data, sim_type, True)[:4]
     all_n.append(n_256)
     t_512 = []
     for p in paths_512:
-        _, n, t = do_simulation(mpath(p), train_data, sim_type, False)
+        _, n, t = do_simulation(mpath(p), train_data, sim_type, False)[:3]
         all_n.append(n)
         t_512.append(t)
     t_512 = np.mean(np.vstack(t_512), 0)
-    _, n_1024, t_1024 = do_simulation(mpath(path_1024), train_data, sim_type, False)
+    _, n_1024, t_1024 = do_simulation(mpath(path_1024), train_data, sim_type, False)[:3]
     all_n.append(n_1024)
-    _, n_2048, t_2048 = do_simulation(mpath(path_2048), train_data, sim_type, False)
+    _, n_2048, t_2048 = do_simulation(mpath(path_2048), train_data, sim_type, False)[:3]
     all_n.append(n_2048)
     all_n = np.mean(np.vstack(all_n), 0)
     fig, ax = pl.subplots()
@@ -155,6 +169,308 @@ def plot_sim(train_data, sim_type):
     sns.despine(fig, ax)
 
 
+def get_cell_responses(model_dir, temp, network_id):
+    """
+    Loads a model and computes the temperature response of all neurons returning response matrix
+    :param model_dir: The directory of the network model
+    :param temp: The temperature input to test on the network
+    :param network_id: Numerical id of the network to later relate units back to a network
+    :return:
+        [0]: n-timepoints x m-neurons matrix of responses
+        [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
+    """
+    mdata = ModelData(model_dir)
+    # prepend lead-in to stimulus
+    lead_in = np.full(mdata.get_input_dims()[2] - 1, np.mean(temp[:10]))
+    temp = np.r_[lead_in, temp]
+    activities = hidden_temperature_responses(mdata, mdata.LastCheckpoint, temp, tdata.temp_mean, tdata.temp_std)
+    activities = np.hstack(activities)
+    # build id matrix
+    id_mat = np.zeros((3, activities.shape[1]), dtype=np.int32)
+    id_mat[0, :] = network_id
+    hidden_sizes = mdata.get_hidden_sizes()
+    start = 0
+    for i, hs in enumerate(hidden_sizes):
+        id_mat[1, start:start + hs] = i
+        id_mat[2, start:start + hs] = np.arange(hs, dtype=np.int32)
+        start += hs
+    return activities, id_mat
+
+
+def create_det_drop_list(network_id, cluster_ids, unit_ids, clust_to_drop, shuffle=False):
+    """
+    Creates a network specific list of deterministic unit drop vectors
+    :param network_id: The id of the network for which to generate drop vectors
+    :param cluster_ids: For each analyzed unit its cluster membership
+    :param unit_ids: For each analyzed unit 3xneurons matrix with network_id, layer index and unit index
+    :param clust_to_drop: Id or list of ids of cluster members to drop
+    :param shuffle: If true drop indicator will be shuffled in each layer
+    :return: List of deterministic drop vectors
+    """
+    if type(clust_to_drop) is not list:
+        clust_to_drop = [clust_to_drop]
+    # use unit_ids to identify topology of network and drop requested units
+    det_drop = []
+    for l_id in np.unique(unit_ids[1, unit_ids[0, :] == network_id]):
+        in_network_layer = np.logical_and(unit_ids[0, :] == network_id, unit_ids[1, :] == l_id)
+        drop = np.ones(in_network_layer.sum())
+        for cd in clust_to_drop:
+            drop[cluster_ids[in_network_layer] == cd] = 0
+        if shuffle:
+            np.random.shuffle(drop)
+        det_drop.append(drop)
+    return det_drop
+
+
+def plot_512sim_w_drop(train_data, sim_type, clust_do_drop, shuffle):
+    all_n = []
+    t_512 = []
+    tdrop_512 = []
+    for i, p in enumerate(paths_512):
+        bins, n, t, _, drop = do_simulation(mpath(p), train_data, sim_type, False,
+                                            create_det_drop_list(i, clust_ids, all_ids, clust_do_drop, shuffle))
+        all_n.append(n)
+        t_512.append(t)
+        tdrop_512.append(drop)
+    t_512 = np.vstack(t_512)
+    all_n = np.mean(np.vstack(all_n), 0)
+    tdrop_512 = np.vstack(tdrop_512)
+    fig, ax = pl.subplots()
+    sns.tsplot(t_512, bins, err_style="unit_traces", color="C0", ax=ax)
+    ax.plot(bins, np.mean(t_512, 0), "C0", lw=2, label="512 dropped")
+    sns.tsplot(tdrop_512, bins, err_style="unit_traces", color="C1", ax=ax)
+    ax.plot(bins, np.mean(tdrop_512, 0), "C1", lw=2, label="512 dropped")
+    ax.plot(bins, all_n, "k", lw=2, label="Naive")
+    ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'C4--')
+    ax.set_ylim(0)
+    ax.legend()
+    ax.set_ylabel("Proportion")
+    ax.set_xlabel("Temperature")
+    sns.despine(fig, ax)
+
+
+def plot_sim_debug(path, train_data, sim_type, drop_list=None):
+    """
+    Runs indicated simulation on fully trained network, retrieves debug information and plots parameter correlations
+    :param path: The model path
+    :param train_data: Training data or equivalent object that provides scaling information
+    :param sim_type: Either "r"adial or "l"inear
+    :param drop_list: Optional list of vectors that indicate which units should be kept (1) or dropped (0)
+    :return:
+        [0]: The simulation positions
+        [1]: The debug dict
+    """
+    mdata = ModelData(path)
+    if sim_type == "l":
+        sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+        if drop_list is not None:
+            sim_trained.remove = drop_list
+    else:
+        sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+        if drop_list is not None:
+            sim_trained.remove = drop_list
+    all_pos, db_dict = sim_trained.run_simulation(n_steps, True)
+    ct = db_dict["curr_temp"]
+    val = np.logical_not(np.isnan(ct))
+    ct = ct[val]
+    pred = db_dict["pred_temp"][val, :]
+    selb = db_dict["sel_behav"][val]
+    tru = db_dict["true_temp"][val, :]
+    # plot counts of different behavior types
+    fig, ax = pl.subplots()
+    sns.countplot(selb, order=sim_trained.btypes)
+    sns.despine(fig, ax)
+    # for each behavior type, plot scatter of prediction vs. current temperature
+    fig, axes = pl.subplots(2, 2)
+    axes = axes.ravel()
+    for i in range(4):
+        axes[i].scatter(ct, pred[:, i], s=2)
+        axes[i].set_xlabel("Current temperature")
+        axes[i].set_ylabel("{0} prediction".format(sim_trained.btypes[i]))
+        axes[i].set_title("r = {0:.2g}".format(np.corrcoef(ct, pred[:, i])[0, 1]))
+    sns.despine(fig)
+    fig.tight_layout()
+    # for each behavior type, plot scatter of prediction vs.true outcome
+    fig, axes = pl.subplots(2, 2)
+    axes = axes.ravel()
+    for i in range(4):
+        axes[i].scatter(tru[:, i], pred[:, i], s=2)
+        axes[i].set_xlabel("{0} tru outcome".format(sim_trained.btypes[i]))
+        axes[i].set_ylabel("{0} prediction".format(sim_trained.btypes[i]))
+        axes[i].set_title("r = {0:.2g}".format(np.corrcoef(tru[:, i], pred[:, i])[0, 1]))
+    sns.despine(fig)
+    fig.tight_layout()
+    # Plot average rank errors binned by current temperature
+    rerbins = 10
+    avg_rank_errors = np.zeros(rerbins)
+    ctb = np.linspace(ct.min(), ct.max(), rerbins+1)
+    bincents = ctb[:-1] + np.diff(ctb)/2
+    for i in range(rerbins):
+        in_bin = np.logical_and(ct >= ctb[i], ct < ctb[i+1])
+        pib = pred[in_bin, :]
+        tib = tru[in_bin, :]
+        errsum = 0
+        for j in range(pib.shape[0]):
+            p_ranks = np.unique(pib[j, :], return_inverse=True)[1]
+            t_ranks = np.unique(tib[j, :], return_inverse=True)[1]
+            errsum += np.sum(np.abs(p_ranks - t_ranks))
+        avg_rank_errors[i] = errsum / pib.shape[0]
+    fig, ax = pl.subplots()
+    ax.plot(bincents, avg_rank_errors, 'o')
+    ax.set_title("Avg. rank errors by temperature")
+    ax.set_xlabel("Binned start temperature")
+    ax.set_ylabel("Average rank error")
+    sns.despine(fig, ax)
+    # also plot occupancy histogram for this simulation
+    counts, bins = np.histogram(sim_trained.temperature(all_pos[:, 0], all_pos[:, 1]), 25)
+    bc = bins[:-1] + np.diff(bins) / 2
+    if sim_type == "r":
+        counts = counts / bc
+    counts = counts / counts.sum()
+    fig, ax = pl.subplots()
+    ax.plot(bc, counts)
+    ax.set_xlabel("Temperature")
+    ax.set_ylabel("Occupancy")
+    sns.despine()
+    return all_pos, db_dict
+
+
+def plot_fish_nonfish_analysis(train_data, sim_type="r"):
+    """
+    Analyzes ablations of fish and non-fish clusters and plots
+    """
+    def sim_info(net_id):
+        def bin_pos(all_pos):
+            nonlocal sim_type
+            nonlocal bins
+            nonlocal sim_naive
+            bin_centers = bins[:-1] + np.diff(bins) / 2
+            if sim_type == "r":
+                quantpos = np.sqrt(all_pos[:, 0]**2 + all_pos[:, 1]**2)
+            else:
+                quantpos = all_pos[:, 0]
+            h = np.histogram(quantpos, bins)[0].astype(float)
+            # normalize for radius if applicable
+            if sim_type == "r":
+                h /= bin_centers
+            h /= h.sum()
+            # convert bin_centers to temperature
+            bin_centers = sim_naive.temperature(bin_centers, np.zeros_like(bin_centers))
+            return bin_centers, h
+
+        nonlocal sim_type
+        nonlocal train_data
+        nonlocal fish
+        nonlocal non_fish
+        mdata = ModelData(mpath(paths_512[net_id]))
+        if sim_type == "l":
+            sim_naive = LinearGradientSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37,
+                                                   TPREFERRED)
+            sim_fish = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_fish.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
+            sim_nonfish = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37,
+                                                   TPREFERRED)
+            sim_nonfish.remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
+            sim_shuff = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_shuff.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
+        else:
+            sim_naive = CircleGradSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_fish = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_fish.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
+            sim_nonfish = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_nonfish.remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
+            sim_shuff = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_shuff.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
+        pos_naive, db_naive = sim_naive.run_simulation(n_steps, True)
+        pos_trained, db_trained = sim_trained.run_simulation(n_steps, True)
+        pos_fish, db_fish = sim_fish.run_simulation(n_steps, True)
+        pos_nonfish, db_nonfish = sim_nonfish.run_simulation(n_steps, True)
+        pos_shuff, db_shuff = sim_shuff.run_simulation(n_steps, True)
+        bins = np.linspace(0, sim_naive.max_pos, 100)
+        bc, h_naive = bin_pos(pos_naive)
+        h_trained = bin_pos(pos_trained)[1]
+        h_fish = bin_pos(pos_fish)[1]
+        h_nonfish = bin_pos(pos_nonfish)[1]
+        h_shuff = bin_pos(pos_shuff)[1]
+        return bc, {"naive": (h_naive, db_naive), "trained": (h_trained, db_trained), "fish": (h_fish, db_fish),
+                    "nonfish": (h_nonfish, db_nonfish), "shuffle": (h_shuff, db_shuff)}
+
+    def prediction_stats(db_dict):
+        """
+        Computes basic statistics on the quality of network predictions using linear regression between prediction
+        and true values
+        :param db_dict: The debug dictionary with simulation information
+        :return:
+            [0]: List of slopes (length four, one for each behavior)
+            [1]: List of intercept
+            [2]: List of correlations (r-values)
+        """
+        ct = db_dict["curr_temp"]
+        val = np.logical_not(np.isnan(ct))
+        pred = db_dict["pred_temp"][val, :]
+        tru = db_dict["true_temp"][val, :]
+        sl, ic, co = [], [], []
+        for i in range(4):
+            s, i, c = linregress(pred[:, i], tru[:, i])[:3]
+            sl.append(s)
+            ic.append(i)
+            co.append(c)
+        return [np.mean(sl)], [np.mean(ic)], [np.mean([co])]
+
+    # get fish and non-fish clusters based on user input
+    all_clust = list(range(n_regs))
+    fish = []
+    failed = True
+    while failed:
+        try:
+            fish = [int(x) for x in input("Input fish like cluster numbers separated by space: ").split()]
+            failed = False
+        except ValueError:
+            print("Invalid input. Retry.", flush=True)
+    non_fish = [elem for elem in all_clust if elem not in fish]
+    print("Fish clusters: ", fish)
+    print("Non-fish clusters: ", non_fish)
+    colors = {"naive": "k", "trained": "C0", "fish": "C3", "nonfish": "C1", "shuffle": "C2"}
+    labels = {"naive": "Naive", "trained": "Trained", "fish": "Fish removed", "nonfish": "NonFish removed",
+              "shuffle": "Shuffled removal"}
+    dists = None
+    corrs = None
+    slopes = None
+    for nid in range(len(paths_512)):
+        print("Network id = ", nid)
+        bcents, results = sim_info(nid)
+        if corrs is None:
+            corrs = {k: [] for k in results.keys()}
+            slopes = {k: [] for k in results.keys()}
+            dists = {k: [] for k in results.keys()}
+        for k in results.keys():
+            s, _, c = prediction_stats(results[k][1])
+            corrs[k] += c
+            slopes[k] += s
+            dists[k].append(results[k][0])
+    # plot gradient distributions of models
+    fig, ax = pl.subplots()
+    for k in dists.keys():
+        sns.tsplot(dists[k], bcents, ax=ax, color=colors[k])
+        ax.plot(bcents, np.mean(dists[k], 0), color=colors[k], label=labels[k])
+    ax.set_ylim(0)
+    ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'k--')
+    ax.set_xlabel("Temperature")
+    ax.set_ylabel("Occupancy")
+    ax.legend()
+    sns.despine(fig, ax)
+    # plot scatter of prediction quality
+    fig, ax = pl.subplots()
+    for k in dists.keys():
+        ax.scatter(corrs[k], slopes[k], c=colors[k], label=labels[k], alpha=0.8)
+    ax.set_xlabel("Correlation")
+    ax.set_ylabel("Slope")
+    ax.legend()
+    sns.despine(fig, ax)
+
+
 if __name__ == "__main__":
     # plot training progress
     plot_squared_losses()
@@ -163,3 +479,54 @@ if __name__ == "__main__":
     tdata = GradientData.load("gd_training_data.hdf5")
     # plot radial sim results
     plot_sim(tdata, "r")
+    # load and interpolate temperature stimulus
+    dfile = h5py.File("stimFile.hdf5", 'r')
+    tsin = np.array(dfile['sine_L_H_temp'])
+    x = np.arange(tsin.size)  # stored at 20 Hz !
+    xinterp = np.linspace(0, tsin.size, tsin.size * FRAME_RATE // 20)
+    temperature = np.interp(xinterp, x, tsin)
+    dfile.close()
+    # for our 512 unit network extract all temperature responses and correponding IDs
+    all_cells = []
+    all_ids = []
+    for i, d in enumerate(paths_512):
+        cell_res, ids = get_cell_responses(mpath(d), temperature, i)
+        all_cells.append(cell_res)
+        all_ids.append(ids)
+    all_cells = np.hstack(all_cells)
+    all_ids = np.hstack(all_ids)
+    # convolve with 3s calcium kernel
+    for i in range(all_cells.shape[1]):
+        all_cells[:, i] = ca_convolve(all_cells[:, i], 3.0, FRAME_RATE)
+    # perform spectral clustering
+    n_regs = 8
+    clust_ids, coords = cluster_responses(all_cells, n_regs)
+    # trial average the "cells"
+    all_cells = trial_average(all_cells, 3)
+
+    # plot spectral embedding and cluster average activity
+    fig = pl.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    for i in range(n_regs):
+        ax.scatter(coords[clust_ids == i, 0], coords[clust_ids == i, 1], coords[clust_ids == i, 2], s=5)
+    fig, (ax_on, ax_off) = pl.subplots(ncols=2)
+    time = np.arange(all_cells.shape[0]) / FRAME_RATE
+    for i in range(n_regs):
+        act = np.mean(all_cells[:, clust_ids == i], 1)
+        if np.corrcoef(act, temperature[:act.size])[0, 1] < 0:
+            sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_off)
+        else:
+            sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_on)
+    ax_off.set_xlabel("Time [s]")
+    ax_off.set_ylabel("Cluster average activity")
+    ax_on.set_xlabel("Time [s]")
+    ax_on.set_ylabel("Cluster average activity")
+    sns.despine()
+    fig.tight_layout()
+
+    # plot cluster sizes
+    fig, ax = pl.subplots()
+    sns.countplot(clust_ids[clust_ids > -1], ax=ax)
+    ax.set_ylabel("Cluster size")
+    ax.set_xlabel("Cluster number")
+    sns.despine(fig, ax)
