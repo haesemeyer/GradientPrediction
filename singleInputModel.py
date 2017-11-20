@@ -123,6 +123,25 @@ class GpNetworkModel:
             last = tf.nn.dropout(last, self._keep_prob, name=self.cvn("DROP", branch, i))
         return last
 
+    def _create_convolution_layer(self, branch, prev_out) -> tf.Tensor:
+        """
+        Creates a convolution layer
+        :param branch: The branch on which to create the layer
+        :param prev_out: The previous output tensor (= input to the convolution)
+        :return: The flattened output of the convolution operation
+        """
+        if 't' in self._branches:
+            len_0 = 1  # branched network, only one input to our convolution layer
+        else:
+            len_0 = 3  # fully mixed network, all three inputs are convolved together
+        w_conv1 = core.create_weight_var(self.cvn("WEIGHT", branch, -1), [len_0, self.binned_size, 1, self.n_conv_layers])
+        b_conv1 = core.create_bias_var(self.cvn("BIAS", branch, -1), [self.n_conv_layers])
+        conv1 = core.create_conv2d(self.cvn("CONV", branch, -1), prev_out, w_conv1)
+        cname = self.cvn("HIDDEN", branch, -1)
+        h_conv1 = tf.nn.relu(conv1 + b_conv1, cname)
+        h_conv1_flat = tf.reshape(h_conv1, [-1, self.n_conv_layers], cname+"_flat")
+        return h_conv1_flat
+
     def _create_feed_dict(self, x_vals, y_vals=None, keep=1.0, removal=None) -> dict:
         """
         Create network feed dict
@@ -182,6 +201,22 @@ class GpNetworkModel:
         # dropout probability placeholder
         self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
         # TODO: Create the full network graph
+        # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
+        self._x_in = tf.placeholder(tf.float32, [None, 3, core.FRAME_RATE * core.HIST_SECONDS, 1], "x_in")
+        # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
+        self._y_ = tf.placeholder(tf.float32, [None, 4], "y_")
+        # data binning layer
+        xin_pool = core.create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
+        # the input convolution depends on the network structure: branched or fully mixed
+        if 't' in self._branches:
+            # branched network - split input into temperature, speed and angle
+            x_1, x_2, x_3 = tf.split(xin_pool, num_or_size_splits=3, axis=1, name="input_split")
+            pass
+        else:
+            # fully mixed network
+            pass
+        # create session
+        self._session = tf.Session()
         # mark network as initialized
         self.initialized = True
 
