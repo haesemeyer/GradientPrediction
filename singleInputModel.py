@@ -51,6 +51,7 @@ class GpNetworkModel:
         self._n_mixed_dense = None
         self._n_branch_dense = None
         self._branches = None
+        self._keep_prob = None
         self._det_remove = {}
 
     # Private API
@@ -73,7 +74,7 @@ class GpNetworkModel:
         if not self.initialized:
             raise NotInitialized("Can't perform operation before performing setup of graph.")
 
-    def _create_hidden_layer(self, branch: str, index: int, prev_out, n_units: int):
+    def _create_hidden_layer(self, branch: str, index: int, prev_out: tf.Tensor, n_units: int) -> tf.Tensor:
         """
         Creates a hidden layer in the network
         :param branch: The branch that layer belongs to
@@ -91,7 +92,7 @@ class GpNetworkModel:
         h = tf.nn.relu((tf.matmul(prev_out, w) + b) * dr * scale, self.cvn("HIDDEN", branch, index))
         return h
 
-    def _create_output(self, prev_out):
+    def _create_output(self, prev_out: tf.Tensor) -> tf.Tensor:
         """
         Creates the output layer for reporting predicted temperature of all four behaviors
         :param prev_out: The output of the previous layer
@@ -101,6 +102,23 @@ class GpNetworkModel:
         b = core.create_bias_var(self.cvn("BIAS", 'o', 0), [4])
         out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
         return out
+
+    def _create_branch(self, branch: str, prev_out: tf.Tensor) -> tf.Tensor:
+        """
+        Creates a branch of the network
+        :param branch: The name of the branch
+        :param prev_out: The output of the previous layer
+        :return: The output of the branch
+        """
+        if branch not in self._branches:
+            raise ValueError("branch {0} is not valid. Has to be one of {1}".format(branch, self._branches))
+        n_layers = self.n_layers_mixed if branch == 'm' else self.n_layers_branch
+        last = prev_out
+        for i in range(n_layers):
+            last = self._create_hidden_layer(branch, i, last,
+                                             self._n_mixed_dense[i] if branch == 'm' else self._n_branch_dense[i])
+            last = tf.nn.dropout(last, self._keep_prob, name=self.cvn("DROP", branch, i))
+        return last
 
     # Public API
     def setup(self):
@@ -120,7 +138,7 @@ class GpNetworkModel:
                                                       name=self.cvn("REMOVE", b, i))
                                        for i in range(self.n_layers_branch)]
         # dropout probability placeholder
-        keep_prob = tf.placeholder(tf.float32, name="keep_prob")
+        self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
         # TODO: Create the full network graph
         # mark network as initialized
         self.initialized = True
