@@ -23,25 +23,12 @@ class GpNetworkModel:
     """
     Class representing gradient prediction network models
     """
-    def __init__(self, n_conv_layers: int, n_units: int, n_layers_branch: int, n_layers_mixed: int):
+    def __init__(self):
         """
-        Creates a new GpNetworkModel with the indicated structure. Does not initialize the graph itself.
-        :param n_conv_layers: The number of convolutional layers per input branch
-        :param n_units: The number of units in each hidden layer
-        :param n_layers_branch: The number of hidden layers in each branch (can be 0 for full mixing)
-        :param n_layers_mixed: The number of hidden layers in the mixed part of the model
+        Creates a new GpNetworkModel
         """
         tf.reset_default_graph()
         self.initialized = False
-        # ingest parameters
-        if n_layers_mixed < 1:
-            raise ValueError("Network needs at least on mixed hidden layer")
-        if n_layers_branch < 0:
-            raise ValueError("Number of branch layers can't be negative")
-        self.n_conv_layers = n_conv_layers
-        self.n_units = n_units
-        self.n_layers_branch = n_layers_branch
-        self.n_layers_mixed = n_layers_mixed
         # set training defaults
         self.w_decay = 1e-4
         self.keep_train = 0.5
@@ -49,6 +36,10 @@ class GpNetworkModel:
         self.t_bin = core.FRAME_RATE // core.MODEL_RATE  # bin input down to 5Hz
         self.binned_size = core.FRAME_RATE * core.HIST_SECONDS // self.t_bin
         # initialize fields that will be populated later
+        self.n_conv_layers = None
+        self.n_units = None
+        self.n_layers_branch = None
+        self.n_layers_mixed = None
         self._n_mixed_dense = None
         self._n_branch_dense = None
         self._branches = None
@@ -59,6 +50,12 @@ class GpNetworkModel:
         self._det_remove = {}  # vectors for deterministic keeping/removal of individual units
         self._x_in = None  # network inputs
         self._y_ = None  # true responses (for training)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.clear()
 
     # Private API
     def _create_unit_lists(self):
@@ -153,10 +150,23 @@ class GpNetworkModel:
         return f_dict
 
     # Public API
-    def setup(self):
+    def setup(self, n_conv_layers: int, n_units: int, n_layers_branch: int, n_layers_mixed: int):
         """
-        Creates the network graph
+        Creates the network graph from scratch according to the given specifications
+        :param n_conv_layers: The number of convolutional layers per input branch
+        :param n_units: The number of units in each hidden layer
+        :param n_layers_branch: The number of hidden layers in each branch (can be 0 for full mixing)
+        :param n_layers_mixed: The number of hidden layers in the mixed part of the model
         """
+        # ingest parameters
+        if n_layers_mixed < 1:
+            raise ValueError("Network needs at least on mixed hidden layer")
+        if n_layers_branch < 0:
+            raise ValueError("Number of branch layers can't be negative")
+        self.n_conv_layers = n_conv_layers
+        self.n_units = n_units
+        self.n_layers_branch = n_layers_branch
+        self.n_layers_mixed = n_layers_mixed
         self.clear()
         self._create_unit_lists()
         # create deterministic removal units
@@ -186,6 +196,10 @@ class GpNetworkModel:
             self._session.close()
             self._session = None
         tf.reset_default_graph()
+        self.n_conv_layers = None
+        self.n_units = None
+        self.n_layers_branch = None
+        self.n_layers_mixed = None
         # mark network as not initialized
         self.initialized = False
 
