@@ -11,6 +11,7 @@ merging
 import tensorflow as tf
 import core
 import numpy as np
+import typing
 
 
 class NotInitialized(Exception):
@@ -51,8 +52,13 @@ class GpNetworkModel:
         self._n_mixed_dense = None
         self._n_branch_dense = None
         self._branches = None
-        self._keep_prob = None
-        self._det_remove = {}
+        # our session object
+        self._session = None  # type: tf.Session
+        # model fields that are later needed for parameter feeding
+        self._keep_prob = None  # drop-out keep probability
+        self._det_remove = {}  # vectors for deterministic keeping/removal of individual units
+        self._x_in = None  # network inputs
+        self._y_ = None  # true responses (for training)
 
     # Private API
     def _create_unit_lists(self):
@@ -120,6 +126,32 @@ class GpNetworkModel:
             last = tf.nn.dropout(last, self._keep_prob, name=self.cvn("DROP", branch, i))
         return last
 
+    def _create_feed_dict(self, x_vals, y_vals=None, keep=1.0, removal=None) -> dict:
+        """
+        Create network feed dict
+        :param x_vals: The network input values
+        :param y_vals: True output values for training (optional)
+        :param keep: The dropout probability for keeping all units
+        :param removal: Deterministic keep/removal vectors
+        :return: The feeding dict to pass to the network
+        """
+        f_dict = {self._x_in: x_vals, self._keep_prob: keep}
+        if y_vals is not None:
+            f_dict[self._y_] = y_vals
+        # Fill deterministic removal part of feed dict
+        for b in self._branches:
+            for i, dr in enumerate(self._det_remove[b]):
+                s = dr.shape[0].value
+                if removal is None:
+                    f_dict[dr] = np.ones(s, dtype=np.float32)
+                else:
+                    if removal[b][i].size != s:
+                        raise ValueError("removal in branch {0} layer {1} does not have required size of {2}".format(b,
+                                                                                                                     i,
+                                                                                                                     s))
+                    f_dict[dr] = removal[b][i]
+        return f_dict
+
     # Public API
     def setup(self):
         """
@@ -149,6 +181,10 @@ class GpNetworkModel:
         """
         if not self.initialized:
             return
+        # close session object if it exists
+        if self._session is not None:
+            self._session.close()
+            self._session = None
         tf.reset_default_graph()
         # mark network as not initialized
         self.initialized = False
