@@ -11,7 +11,6 @@ merging
 import tensorflow as tf
 import core
 import numpy as np
-import typing
 
 
 class NotInitialized(Exception):
