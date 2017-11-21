@@ -50,6 +50,10 @@ class GpNetworkModel:
         self._det_remove = {}  # vectors for deterministic keeping/removal of individual units
         self._x_in = None  # network inputs
         self._y_ = None  # true responses (for training)
+        self._m_out = None  # network output
+        self._sq_loss = None  # the squared loss (loss w.o. weight decay)
+        self._total_loss = None  # total loss across the network
+        self._train_step = None  # the network training step
 
     def __enter__(self):
         return self
@@ -200,7 +204,6 @@ class GpNetworkModel:
                                        for i in range(self.n_layers_branch)]
         # dropout probability placeholder
         self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
-        # TODO: Create the full network graph
         # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
         self._x_in = tf.placeholder(tf.float32, [None, 3, core.FRAME_RATE * core.HIST_SECONDS, 1], "x_in")
         # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
@@ -211,10 +214,23 @@ class GpNetworkModel:
         if 't' in self._branches:
             # branched network - split input into temperature, speed and angle
             x_1, x_2, x_3 = tf.split(xin_pool, num_or_size_splits=3, axis=1, name="input_split")
-            pass
+            # create convolution and deep layer for each branch
+            time = self._create_convolution_layer('t', x_1)
+            time = self._create_branch('t', time)
+            speed = self._create_convolution_layer('s', x_2)
+            speed = self._create_branch('s', speed)
+            angle = self._create_convolution_layer('a', x_3)
+            angle = self._create_branch('a', angle)
+            # combine branch outputs and create mix branch
+            mix = tf.concat([time, speed, angle], 1, self.cvn("HIDDEN", 'm', -1))
+            mix = self._create_branch('m', mix)
         else:
             # fully mixed network
-            pass
+            mix = self._create_convolution_layer('m', xin_pool)
+        self._m_out = self._create_output(mix)
+        # create and store losses and training step
+        self._total_loss, self._sq_loss = core.get_loss(self._y_, self._m_out)
+        self._train_step = core.create_train_step(self._total_loss)
         # create session
         self._session = tf.Session()
         # mark network as initialized
