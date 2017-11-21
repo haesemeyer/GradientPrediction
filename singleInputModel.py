@@ -50,10 +50,14 @@ class GpNetworkModel:
         self._det_remove = {}  # vectors for deterministic keeping/removal of individual units
         self._x_in = None  # network inputs
         self._y_ = None  # true responses (for training)
-        self._m_out = None  # network output
-        self._sq_loss = None  # the squared loss (loss w.o. weight decay)
-        self._total_loss = None  # total loss across the network
-        self._train_step = None  # the network training step
+        # network output
+        self._m_out = None  # type: tf.Tensor
+        # the square loss (loss w.o. weight decay)
+        self._sq_loss = None  # type: tf.Tensor
+        # total loss across the network
+        self._total_loss = None  # type: tf.Tensor
+        # the training step to train the network
+        self._train_step = None  # type: tf.Operation
 
     def __enter__(self):
         return self
@@ -253,6 +257,38 @@ class GpNetworkModel:
         self.n_layers_mixed = None
         # mark network as not initialized
         self.initialized = False
+
+    def train(self, xbatch, ybatch, keep=0.5):
+        """
+        Runs a training step on the given batches
+        :param xbatch: The input of the training batch
+        :param ybatch: The true labels of the training batch
+        :param keep: The keep probability of each unit
+        """
+        self._check_init()
+        self._train_step.run(self._create_feed_dict(xbatch, ybatch, keep), self._session)
+
+    def get_squared_loss(self, xbatch, ybatch, keep=1) -> float:
+        """
+        Computes the square loss over the given batch
+        :param xbatch: The batch input
+        :param ybatch: The true labels of the batch
+        :param keep: The keep probability of each unit
+        :return: The square loss
+        """
+        self._check_init()
+        return self._sq_loss.eval(self._create_feed_dict(xbatch, ybatch, keep), self._session)
+
+    def predict(self, xbatch, keep=1, det_drop=None) -> tf.Tensor:
+        """
+        Uses the network to predict output given the input
+        :param xbatch: The network input
+        :param keep: The keep probability of each unit
+        :param det_drop: The deterministic keep/drop of each unit
+        :return: The network output
+        """
+        self._check_init()
+        return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop))
 
     def cvn(self, vartype: str, branch: str, index: int) -> str:
         """
