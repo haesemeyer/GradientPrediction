@@ -57,6 +57,8 @@ class GpNetworkModel:
         self._total_loss = None  # type: tf.Tensor
         # the training step to train the network
         self._train_step = None  # type: tf.Operation
+        # saver object to save progress
+        self._saver = None  # type: tf.train.Saver
 
     def __enter__(self):
         return self
@@ -240,6 +242,8 @@ class GpNetworkModel:
         self._session = tf.Session()
         # mark network as initialized
         self.initialized = True
+        # intialize all variables
+        self.init_variables()
 
     def clear(self):
         """
@@ -251,6 +255,7 @@ class GpNetworkModel:
         if self._session is not None:
             self._session.close()
             self._session = None
+        self._saver = None
         tf.reset_default_graph()
         self.n_conv_layers = None
         self.n_units = None
@@ -265,6 +270,19 @@ class GpNetworkModel:
         """
         self._check_init()
         self._session.run(tf.global_variables_initializer())
+
+    def save_state(self, chkpoint_file, index, save_meta=True) -> str:
+        """
+        Saves the current state of the network to a checkpoint
+        :param chkpoint_file: The base chkpoint file name
+        :param index: The index of the current chkpoint
+        :param save_meta: Whether to save the meta-graph as well or not
+        :return: The full chkpoint filename and path
+        """
+        self._check_init()
+        if self._saver is None:
+            self._saver = tf.train.Saver(max_to_keep=None)  # never delete chkpoint files
+        return self._saver.save(self._session, chkpoint_file, global_step=index, write_meta_graph=save_meta)
 
     def train(self, xbatch, ybatch, keep=0.5):
         """
@@ -314,8 +332,24 @@ class GpNetworkModel:
             raise ValueError("Unknown branch type {0}. Has to be in {1}".format(branch, self._branches))
         return "{0}_{1}_{2}".format(vartype, branch, index)
 
+    @property
+    def convolution_data(self):
+        """
+        The weights and biases of the convolution layer(s)
+        """
+        self._check_init()
+        if 't' in self._branches:
+            to_get = ['t', 's', 'a']
+        else:
+            to_get = ['m']
+        g = self._session.graph
+        w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in to_get}
+        b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
+        return w, b
+
 
 if __name__ == "__main__":
+    N_CONV_LAYERS = 10
     import matplotlib.pyplot as pl
     import seaborn as sns
     from scipy.ndimage import gaussian_filter1d
@@ -324,8 +358,7 @@ if __name__ == "__main__":
     t_losses = []
     d_fracs = []
     with GpNetworkModel() as model:
-        model.setup(10, 512, 2, 2)
-        model.init_variables()
+        model.setup(N_CONV_LAYERS, 512, 2, 2)
         for i in range(2000):
             xb1 = np.random.randn(100, 1, core.FRAME_RATE * core.HIST_SECONDS, 1)
             xb2 = xb1 ** 2
@@ -342,16 +375,16 @@ if __name__ == "__main__":
             if i % 200 == 0:
                 print('step %d, training loss %g, delta fraction %g' % (i, cur_l, cur_d))
             model.train(xbatch, ybatch)
-        # weights_conv1 = W_conv1.eval()
-        # bias_conv1 = B_conv1.eval()
+        weights_conv, bias_conv = model.convolution_data
 
-    # w_ext = np.max(np.abs(weights_conv1))
-    # fig, ax = pl.subplots(ncols=int(np.sqrt(N_CONV_LAYERS)), nrows=int(np.sqrt(N_CONV_LAYERS)), frameon=False,
-    #                       figsize=(14, 2.8))
-    # ax = ax.ravel()
-    # for i, a in enumerate(ax):
-    #     sns.heatmap(weights_conv1[:, :, 0, i], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
-    #     a.axis("off")
+    weights_conv = weights_conv['t']
+    w_ext = np.max(np.abs(weights_conv))
+    fig, ax = pl.subplots(ncols=int(np.sqrt(N_CONV_LAYERS)), nrows=int(np.sqrt(N_CONV_LAYERS)), frameon=False,
+                          figsize=(14, 2.8))
+    ax = ax.ravel()
+    for i, a in enumerate(ax):
+        sns.heatmap(weights_conv[:, :, 0, i], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
+        a.axis("off")
 
     pl.figure()
     pl.plot(t_losses, 'o')
