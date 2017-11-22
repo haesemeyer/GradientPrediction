@@ -63,6 +63,7 @@ class GpNetworkModel:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.clear()
+        return False  # re-raise any previous exceptions
 
     # Private API
     def _create_unit_lists(self):
