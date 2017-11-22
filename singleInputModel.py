@@ -15,7 +15,7 @@ import numpy as np
 
 class NotInitialized(Exception):
     def __init__(self, message):
-        super.__init__(message)
+        super().__init__(message)
 
 
 class GpNetworkModel:
@@ -231,6 +231,7 @@ class GpNetworkModel:
         else:
             # fully mixed network
             mix = self._create_convolution_layer('m', xin_pool)
+            mix = self._create_branch('m', mix)
         self._m_out = self._create_output(mix)
         # create and store losses and training step
         self._total_loss, self._sq_loss = core.get_loss(self._y_, self._m_out)
@@ -257,6 +258,13 @@ class GpNetworkModel:
         self.n_layers_mixed = None
         # mark network as not initialized
         self.initialized = False
+
+    def init_variables(self):
+        """
+        Runs global variable initializer, resetting all values
+        """
+        self._check_init()
+        self._session.run(tf.global_variables_initializer())
 
     def train(self, xbatch, ybatch, keep=0.5):
         """
@@ -288,7 +296,7 @@ class GpNetworkModel:
         :return: The network output
         """
         self._check_init()
-        return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop))
+        return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop), session=self._session)
 
     def cvn(self, vartype: str, branch: str, index: int) -> str:
         """
@@ -310,4 +318,51 @@ class GpNetworkModel:
 if __name__ == "__main__":
     import matplotlib.pyplot as pl
     import seaborn as sns
+    from scipy.ndimage import gaussian_filter1d
     print("Testing separate input model.", flush=True)
+    print("For each 'behavior' subpart attempt to learn different sums on standard normal distribution", flush=True)
+    t_losses = []
+    d_fracs = []
+    with GpNetworkModel() as model:
+        model.setup(10, 512, 2, 2)
+        model.init_variables()
+        for i in range(2000):
+            xb1 = np.random.randn(100, 1, core.FRAME_RATE * core.HIST_SECONDS, 1)
+            xb2 = xb1 ** 2
+            xb2 -= 1  # expected average of xb1**2
+            xb3 = xb1 ** 3
+            xbatch = np.concatenate((xb1, xb2, xb3), 1)
+            ybatch = np.c_[np.sum(xb2, axis=(1, 2)), np.sum(xb2 / 4, axis=(1, 2)),
+                           np.sum(xb1, axis=(1, 2)), np.sum(xb1 / 2, axis=(1, 2))]
+            cur_l = model.get_squared_loss(xbatch, ybatch)
+            pred = model.predict(xbatch)
+            cur_d = np.median(np.abs((ybatch - pred) / ybatch))
+            t_losses.append(cur_l)
+            d_fracs.append(cur_d)
+            if i % 200 == 0:
+                print('step %d, training loss %g, delta fraction %g' % (i, cur_l, cur_d))
+            model.train(xbatch, ybatch)
+        # weights_conv1 = W_conv1.eval()
+        # bias_conv1 = B_conv1.eval()
+
+    # w_ext = np.max(np.abs(weights_conv1))
+    # fig, ax = pl.subplots(ncols=int(np.sqrt(N_CONV_LAYERS)), nrows=int(np.sqrt(N_CONV_LAYERS)), frameon=False,
+    #                       figsize=(14, 2.8))
+    # ax = ax.ravel()
+    # for i, a in enumerate(ax):
+    #     sns.heatmap(weights_conv1[:, :, 0, i], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
+    #     a.axis("off")
+
+    pl.figure()
+    pl.plot(t_losses, 'o')
+    pl.plot(gaussian_filter1d(t_losses, 25))
+    pl.xlabel("Batch")
+    pl.ylabel("Training loss")
+    sns.despine()
+
+    pl.figure()
+    pl.plot(d_fracs, 'o')
+    pl.plot(gaussian_filter1d(d_fracs, 25))
+    pl.xlabel("Batch")
+    pl.ylabel("Error fraction")
+    sns.despine()
