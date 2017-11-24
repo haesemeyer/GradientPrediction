@@ -376,6 +376,28 @@ class ModelData:
             raise KeyError("No checkpoint with index {0} found.".format(item))
 
 
+class GradientStandards:
+    """
+    Lightweight wrapper of only standardizations used in a gradient data object
+    """
+    def __init__(self, temp_mean, temp_std, disp_mean, disp_std, ang_mean, ang_std):
+        """
+        Creates a new GradientStandards object
+        :param temp_mean: The temperature average
+        :param temp_std: The temperature standard deviation
+        :param disp_mean: The displacement average
+        :param disp_std: The displacement standard deviation
+        :param ang_mean: The angle average
+        :param ang_std: The angle standard
+        """
+        self.temp_mean = temp_mean
+        self.temp_std = temp_std
+        self.disp_mean = disp_mean
+        self.disp_std = disp_std
+        self.ang_mean = ang_mean
+        self.ang_std = ang_std
+
+
 class GradientData:
     """
     Class that represents training/test data from a gradient experiment
@@ -446,6 +468,14 @@ class GradientData:
         """
         return self.model_out[self.rev_map, :]
 
+    @property
+    def standards(self):
+        """
+        The value standardizations
+        """
+        return GradientStandards(self.temp_mean, self.temp_std, self.disp_mean, self.disp_std, self.ang_mean,
+                                 self.ang_std)
+
     def zsc_inputs(self, m_in):
         """
         Return z-scored version of model input matrix
@@ -491,6 +521,13 @@ class GradientData:
             grp.create_dataset("PRED_WINDOW", data=self.pred_window)
             grp.create_dataset("FRAME_RATE", data=self.frame_rate)
             grp.create_dataset("HIST_SECONDS", data=self.hist_seconds)
+            grp2 = dfile.create_group("normalization")
+            grp2.create_dataset("temp_mean", data=self.temp_mean)
+            grp2.create_dataset("temp_std", data=self.temp_std)
+            grp2.create_dataset("disp_mean", data=self.disp_mean)
+            grp2.create_dataset("disp_std", data=self.disp_std)
+            grp2.create_dataset("ang_mean", data=self.ang_mean)
+            grp2.create_dataset("ang_std", data=self.ang_std)
         finally:
             dfile.close()
 
@@ -509,6 +546,24 @@ class GradientData:
         f = np.array(dfile["model_info"]["FRAME_RATE"])
         h = np.array(dfile["model_info"]["HIST_SECONDS"])
         return GradientData(np.array(dfile["model_in_raw"]), np.array(dfile["model_out_raw"]), p, f, h)
+
+    @staticmethod
+    def load_standards(filename):
+        """
+        Loads training data standardizations from an hdf5 file
+        :param filename: The file to load data from
+        :return: A lightweight representation of only the standardization values
+        """
+        dfile = h5py.File(filename, 'r')
+        if "model_in_raw" not in dfile or "model_out_raw" not in dfile:
+            dfile.close()
+            raise IOError("File does not seem to contain gradient data")
+        if "normalization" not in dfile:
+            dfile.close()
+            raise IOError("File does not contain standardizations. Load full data instead.")
+        grp = dfile["normalization"]
+        return GradientStandards(np.array(grp["temp_mean"]), np.array(grp["temp_std"]), np.array(grp["disp_mean"]),
+                                 np.array(grp["disp_std"]), np.array(grp["ang_mean"]), np.array(grp["ang_std"]))
 
 
 class TemperatureArena:
