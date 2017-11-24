@@ -451,6 +451,8 @@ class GpNetworkModel:
         # create and store losses and training step
         self._total_loss, self._sq_loss = get_loss(self._y_, self._m_out)
         self._train_step = create_train_step(self._total_loss)
+        # store our training operation
+        tf.add_to_collection('train_op', self._train_step)
         # create session
         self._session = tf.Session()
         # mark network as initialized
