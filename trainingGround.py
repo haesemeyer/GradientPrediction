@@ -6,8 +6,7 @@
 Script to train gradient navigation model
 """
 
-import tensorflow as tf
-from core import GradientData
+from core import GradientData, GpNetworkModel
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns
@@ -21,8 +20,20 @@ N_EPOCHS = 10  # the number of training epochs to run
 EVAL_TRAIN_EVERY = 5  # every this many trials training set performance is evaluated
 EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluated
 
+SEPARATE = True
+
+if SEPARATE:
+    N_UNITS = 512
+    N_BRANCH = 2
+    N_MIXED = 3
+    N_CONV = 40
+else:
+    N_UNITS = 512
+    N_BRANCH = 0
+    N_MIXED = 3
+    N_CONV = 40
+
 if __name__ == "__main__":
-    import mixedInputModel as mIM
     trainingData = GradientData.load("gd_training_data.hdf5")
     testData = GradientData.load("gd_test_data_1.hdf5")
     # enforce same scaling on testData as on trainingData
@@ -31,31 +42,26 @@ if __name__ == "__main__":
     rank_errors = []
     test_losses = []
     test_rank_errors = []
-    # store our training operation
-    tf.add_to_collection('train_op', mIM.t_step)
-    # create saver
-    saver = tf.train.Saver(max_to_keep=None)
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
+    with GpNetworkModel() as model:
+        model.setup(N_CONV, N_UNITS, N_BRANCH, N_MIXED)
         n_train = (trainingData.data_size * N_EPOCHS) // BATCHSIZE
         for i in range(n_train):
             # save naive model including full graph
             if i == 0:
-                save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=i)
+                save_path = model.save_state("./model_data/mixedInputModel.ckpt", i)
                 print("Model saved in file: %s" % save_path)
-            # save variables every 5000 steps but don't re-save model-meta
-            if i != 0 and i % 5000 == 0:
-                save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=i, write_meta_graph=False)
+            # save variables every 10000 steps but don't re-save model-meta
+            if i != 0 and i % 10000 == 0:
+                save_path = model.save_state("./model_data/mixedInputModel.ckpt", i, False)
                 print("Model saved in file: %s" % save_path)
             batch_data = trainingData.training_batch(BATCHSIZE)
             xbatch = batch_data[0]
             ybatch = batch_data[1]
             # every five steps compute training losses
             if i % EVAL_TRAIN_EVERY == 0:
-                fd = mIM.create_feed_dict(xbatch, ybatch, 1.0)
-                cur_l = mIM.sq_loss.eval(feed_dict=fd)
+                cur_l = model.get_squared_loss(xbatch, ybatch)
                 # compare ranks of options in prediction vs. ranks of real options
-                pred = mIM.m_out.eval(feed_dict=fd)
+                pred = model.predict(xbatch)
                 sum_rank_diffs = 0.0
                 for elem in range(BATCHSIZE):
                     rank_real = np.unique(ybatch[elem, :], return_inverse=True)[1]
@@ -71,9 +77,8 @@ if __name__ == "__main__":
                 test = testData.training_batch(TESTSIZE)
                 xtest = test[0]
                 ytest = test[1]
-                fd = mIM.create_feed_dict(xtest, ytest, 1.0)
-                cur_l = mIM.sq_loss.eval(feed_dict=fd)
-                pred_test = mIM.m_out.eval(feed_dict=fd)
+                cur_l = model.get_squared_loss(xtest, ytest)
+                pred_test = model.predict(xtest)
                 sum_rank_diffs = 0.0
                 for elem in range(TESTSIZE):
                     rank_real = np.unique(ytest[elem, :], return_inverse=True)[1]
@@ -84,16 +89,18 @@ if __name__ == "__main__":
                 print("TEST")
                 test_losses.append(cur_l)
                 test_rank_errors.append(sum_rank_diffs / TESTSIZE)
-            # create training feed dict
-            fd = mIM.create_feed_dict(xbatch, ybatch, mIM.KEEP_TRAIN)
-            mIM.t_step.run(feed_dict=fd)
+            model.train(xbatch, ybatch)
         # save final progress
-        save_path = saver.save(sess, "./model_data/mixedInputModel.ckpt", global_step=n_train, write_meta_graph=False)
+        save_path = model.save_state("./model_data/mixedInputModel.ckpt", i, False)
         print("Final model saved in file: %s" % save_path)
-        weights_conv1 = mIM.W_conv1.eval()
+        weights_conv1 = model.convolution_data[0]
+        if 't' in weights_conv1:
+            weights_conv1 = weights_conv1['t']
+        else:
+            weights_conv1 = weights_conv1['m']
 
     w_ext = np.max(np.abs(weights_conv1))
-    fig, ax = pl.subplots(ncols=int(np.sqrt(mIM.N_CONV_LAYERS)), nrows=int(np.sqrt(mIM.N_CONV_LAYERS)), frameon=False,
+    fig, ax = pl.subplots(ncols=int(np.sqrt(N_CONV)), nrows=int(np.sqrt(N_CONV)), frameon=False,
                           figsize=(14, 2.8))
     ax = ax.ravel()
     for i, a in enumerate(ax):
