@@ -286,12 +286,12 @@ class GpNetworkModel:
         Creates lists of hidden unit counts and branch list according to network configuration
         """
         self._det_remove = {}
-        self._n_mixed_dense = [self.n_units] * self.n_layers_mixed
+        self._n_mixed_dense = [self.n_units[1]] * self.n_layers_mixed
         if self.n_layers_branch == 0:
             self._branches = ['m', 'o']  # mixed network
         else:
             self._branches = ['t', 's', 'a', 'm', 'o']  # single input network
-            self._n_branch_dense = [self.n_units] * self.n_layers_mixed
+            self._n_branch_dense = [self.n_units[0]] * self.n_layers_branch
 
     def _check_init(self):
         """
@@ -392,11 +392,11 @@ class GpNetworkModel:
         return f_dict
 
     # Public API
-    def setup(self, n_conv_layers: int, n_units: int, n_layers_branch: int, n_layers_mixed: int):
+    def setup(self, n_conv_layers: int, n_units, n_layers_branch: int, n_layers_mixed: int):
         """
         Creates the network graph from scratch according to the given specifications
         :param n_conv_layers: The number of convolutional layers per input branch
-        :param n_units: The number of units in each hidden layer
+        :param n_units: The number of units in each hidden layer or 2 element list for units in branch and mix
         :param n_layers_branch: The number of hidden layers in each branch (can be 0 for full mixing)
         :param n_layers_mixed: The number of hidden layers in the mixed part of the model
         """
@@ -406,7 +406,12 @@ class GpNetworkModel:
         if n_layers_branch < 0:
             raise ValueError("Number of branch layers can't be negative")
         self.n_conv_layers = n_conv_layers
-        self.n_units = n_units
+        if type(n_units) is not list:
+            self.n_units = [n_units] * 2
+        else:
+            if len(n_units) != 2:
+                raise ValueError("n_units should either be scalar or a 2-element list")
+            self.n_units = n_units
         self.n_layers_branch = n_layers_branch
         self.n_layers_mixed = n_layers_mixed
         self.clear()
