@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter1d
 import h5py
 
 BATCHSIZE = 32  # the sample size of each training batch
-TESTSIZE = 200  # the sample size of each test batch
+TESTSIZE = 128  # the sample size of each test batch
 N_EPOCHS = 10  # the number of training epochs to run
 
 EVAL_TRAIN_EVERY = 5  # every this many trials training set performance is evaluated
@@ -23,15 +23,17 @@ EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluat
 SEPARATE = True
 
 if SEPARATE:
-    N_UNITS = 512
+    N_UNITS = [512, 1024]
     N_BRANCH = 2
     N_MIXED = 3
     N_CONV = 40
+    chk_file = "./model_data/separateInputModel.ckpt"
 else:
     N_UNITS = 512
     N_BRANCH = 0
     N_MIXED = 3
     N_CONV = 40
+    chk_file = "./model_data/mixedInputModel.ckpt"
 
 if __name__ == "__main__":
     trainingData = GradientData.load("gd_training_data.hdf5")
@@ -48,11 +50,11 @@ if __name__ == "__main__":
         for i in range(n_train):
             # save naive model including full graph
             if i == 0:
-                save_path = model.save_state("./model_data/mixedInputModel.ckpt", i)
+                save_path = model.save_state(chk_file, i)
                 print("Model saved in file: %s" % save_path)
             # save variables every 10000 steps but don't re-save model-meta
             if i != 0 and i % 10000 == 0:
-                save_path = model.save_state("./model_data/mixedInputModel.ckpt", i, False)
+                save_path = model.save_state(chk_file, i, False)
                 print("Model saved in file: %s" % save_path)
             batch_data = trainingData.training_batch(BATCHSIZE)
             xbatch = batch_data[0]
@@ -91,7 +93,7 @@ if __name__ == "__main__":
                 test_rank_errors.append(sum_rank_diffs / TESTSIZE)
             model.train(xbatch, ybatch)
         # save final progress
-        save_path = model.save_state("./model_data/mixedInputModel.ckpt", i, False)
+        save_path = model.save_state(chk_file, i, False)
         print("Final model saved in file: %s" % save_path)
         weights_conv1 = model.convolution_data[0]
         if 't' in weights_conv1:
