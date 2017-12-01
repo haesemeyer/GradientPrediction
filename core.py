@@ -381,7 +381,7 @@ class GpNetworkModel:
         for b in self._branches:
             for i, dr in enumerate(self._det_remove[b]):
                 s = dr.shape[0].value
-                if removal is None:
+                if removal is None or b not in removal:
                     f_dict[dr] = np.ones(s, dtype=np.float32)
                 else:
                     if removal[b][i].size != s:
