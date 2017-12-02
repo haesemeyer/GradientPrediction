@@ -465,6 +465,60 @@ class GpNetworkModel:
         # intialize all variables
         self.init_variables()
 
+    def load(self, meta_file: str, checkpoint_file: str):
+        """
+        Loads model definitions from model description file and populates data from given checkpoint
+        :param meta_file: The model definition file
+        :param checkpoint_file: The saved model checkpoint (weights, etc.)
+        """
+        # restore graph and variables
+        self._session = tf.Session()
+        saver = tf.train.import_meta_graph(meta_file)
+        saver.restore(self._session, checkpoint_file)
+        graph = self._session.graph
+        self._m_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
+        self._x_in = graph.get_tensor_by_name("x_in:0")
+        self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
+        self._y_ = graph.get_tensor_by_name("y_:0")
+        # collect deterministic removal units and use these to determine which branches exist and how many layers they
+        # have
+        possible_branches = ['t', 's', 'a', 'm', 'o']
+        self._branches = []
+        self._det_remove = {}
+        for b in possible_branches:
+            try:
+                graph.get_tensor_by_name(self.cvn("REMOVE", b, 0)+":0")
+                # we found layer 0 in this branch so it exists
+                self._branches.append(b)
+                self._det_remove[b] = []
+                i = 0
+                try:
+                    while True:
+                        self._det_remove[b].append(graph.get_tensor_by_name(self.cvn("REMOVE", b, i)+":0"))
+                        i += 1
+                except KeyError:
+                    pass
+            except KeyError:
+                continue
+        if 't' in self._branches:
+            self.n_layers_branch = len(self._det_remove['t'])
+        else:
+            self.n_layers_branch = 0
+        self.n_units = [0, 0]
+        self.n_layers_mixed = len(self._det_remove['m'])
+        self._n_mixed_dense = [self._det_remove['m'][i].shape[0].value for i in range(self.n_layers_mixed)]
+        self.n_units[1] = self._n_mixed_dense[0]
+        if self.n_layers_branch > 0:
+            self._n_branch_dense = [self._det_remove['t'][i].shape[0].value for i in range(self.n_layers_branch)]
+            self.n_units[0] = self._n_branch_dense[0]
+        else:
+            self._n_branch_dense = []
+        # retrieve training step
+        self._train_step = graph.get_collection("train_op")[0]
+        # set up squared loss calculation
+        self._sq_loss = tf.losses.mean_squared_error(labels=self._y_, predictions=self._m_out)
+        self.initialized = True
+
     def clear(self):
         """
         Clears the network graph
@@ -548,8 +602,6 @@ class GpNetworkModel:
         vartypes = ["WEIGHT", "BIAS", "HIDDEN", "DROP", "REMOVE", "CONV", "OUTPUT"]
         if vartype not in vartypes:
             raise ValueError("Unknown vartype {0}. Has to be in {1}".format(vartype, vartypes))
-        if branch not in self._branches:
-            raise ValueError("Unknown branch type {0}. Has to be in {1}".format(branch, self._branches))
         return "{0}_{1}_{2}".format(vartype, branch, index)
 
     @property
