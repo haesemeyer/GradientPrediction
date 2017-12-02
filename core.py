@@ -471,6 +471,7 @@ class GpNetworkModel:
         :param meta_file: The model definition file
         :param checkpoint_file: The saved model checkpoint (weights, etc.)
         """
+        self.clear()
         # restore graph and variables
         self._session = tf.Session()
         saver = tf.train.import_meta_graph(meta_file)
