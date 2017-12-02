@@ -124,35 +124,6 @@ def create_train_step(total_loss):
     return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
 
 
-def test_error_distributions(model_file: str, chkpoint: str, test_data):
-    """
-    For a given model at a given checkpoint returns the distribution of squared losses and rank errors across test data
-    :param model_file: The file of the model definitions (.meta)
-    :param chkpoint: The model checkpoint (.ckpt)
-    :param test_data: The test data to evaluate the model
-        [0]: For each datapoint in test_data the squared error loss
-        [1]: For each datapoint in test_data the rank error
-    """
-    sq_errors = np.full(test_data.data_size, -1)
-    rank_errors = np.full(test_data.data_size, -1)
-    with tf.Session() as sess:
-        saver = tf.train.import_meta_graph(model_file)
-        saver.restore(sess, chkpoint)
-        graph = tf.get_default_graph()
-        m_out = graph.get_tensor_by_name("m_out:0")
-        x_in = graph.get_tensor_by_name("x_in:0")
-        y_ = graph.get_tensor_by_name("y_:0")
-        keep_prob = graph.get_tensor_by_name("keep_prob:0")
-        for i in range(test_data.data_size):
-            xbatch, ybatch = test_data.training_batch(1)
-            pred = m_out.eval(feed_dict={x_in: xbatch, y_: ybatch, keep_prob: 1.0})
-            sq_errors[i] = (np.sum((ybatch - pred)**2))
-            rank_real = np.unique(ybatch, return_inverse=True)[1]
-            rank_pred = np.unique(pred, return_inverse=True)[1]
-            rank_errors[i] = np.sum(np.abs(rank_real - rank_pred))
-    return sq_errors, rank_errors
-
-
 def hidden_temperature_responses(model, chkpoint, t_stimulus, t_mean, t_std):
     """
     Computes and returns the responses of each hidden unit in the network in response to a temperature stimulus
@@ -580,7 +551,7 @@ class GpNetworkModel:
         self._check_init()
         return self._sq_loss.eval(self._create_feed_dict(xbatch, ybatch, keep), self._session)
 
-    def predict(self, xbatch, keep=1, det_drop=None) -> tf.Tensor:
+    def predict(self, xbatch, keep=1.0, det_drop=None) -> tf.Tensor:
         """
         Uses the network to predict output given the input
         :param xbatch: The network input
@@ -590,6 +561,25 @@ class GpNetworkModel:
         """
         self._check_init()
         return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop), session=self._session)
+
+    def test_error_distributions(self, test_data):
+        """
+        For the network returns the distribution of squared losses and rank errors across test data
+        :param test_data: The test data to evaluate the model
+            [0]: For each datapoint in test_data the squared error loss
+            [1]: For each datapoint in test_data the rank error
+        """
+        self._check_init()
+        sq_errors = np.full(test_data.data_size, -1)
+        rank_errors = np.full(test_data.data_size, -1)
+        for i in range(test_data.data_size):
+            xbatch, ybatch = test_data.training_batch(1)
+            pred = self.predict(xbatch, 1.0)
+            sq_errors[i] = (np.sum((ybatch - pred) ** 2))
+            rank_real = np.unique(ybatch, return_inverse=True)[1]
+            rank_pred = np.unique(pred, return_inverse=True)[1]
+            rank_errors[i] = np.sum(np.abs(rank_real - rank_pred))
+        return sq_errors, rank_errors
 
     @staticmethod
     def cvn(vartype: str, branch: str, index: int) -> str:
