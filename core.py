@@ -591,7 +591,8 @@ class GpNetworkModel:
         self._check_init()
         return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop), session=self._session)
 
-    def cvn(self, vartype: str, branch: str, index: int) -> str:
+    @staticmethod
+    def cvn(vartype: str, branch: str, index: int) -> str:
         """
         Creates a reproducible variable name for layer specific variables
         :param vartype: The variable type (WEIGHT, BIAS, HIDDEN, DROP, REMOVE, CONV)
