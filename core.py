@@ -124,50 +124,6 @@ def create_train_step(total_loss):
     return tf.train.AdamOptimizer(1e-4).minimize(total_loss)
 
 
-def hidden_temperature_responses(model, chkpoint, t_stimulus, t_mean, t_std):
-    """
-    Computes and returns the responses of each hidden unit in the network in response to a temperature stimulus
-    (all other inputs are clamped to 0)
-    :param model: ModelData object to describe model
-    :param chkpoint: The model checkpoint (.ckpt) file or index into ModelData
-    :param t_stimulus: The temperature stimulus in C
-    :param t_mean: The average temperature of the stimulus used to train the network
-    :param t_std: The temperature standard deviation of the stimulus used to train the network
-    :return: List with n_hidden elements, each an array of time x n_units activations of hidden units
-    """
-    # if chkpoint is not a string we assume it is meant as index into model - validate
-    if type(chkpoint) != str:
-        if chkpoint not in model:
-            raise ValueError("{0} is not a valid model checkpoint".format(chkpoint))
-        else:
-            chkpoint = model[chkpoint]
-    n_hidden = model.get_n_hidden()
-    history = model.get_input_dims()[2]
-    activity = []
-    tf.reset_default_graph()
-    with tf.Session() as sess:
-        saver = tf.train.import_meta_graph(model.ModelDefinition)
-        saver.restore(sess, chkpoint)
-        graph = tf.get_default_graph()
-        keep_prob = graph.get_tensor_by_name("keep_prob:0")
-        x_in = graph.get_tensor_by_name("x_in:0")
-        ix = indexing_matrix(np.arange(t_stimulus.size), history-1, 0, t_stimulus.size)[0]
-        model_in = np.zeros((ix.shape[0], 3, history, 1))
-        model_in[:, 0, :, 0] = (t_stimulus[ix] - t_mean) / t_std
-        for i in range(n_hidden):
-            h = graph.get_tensor_by_name("h_{0}:0".format(i))
-            fd = {x_in: model_in, keep_prob: 1.0}
-            # Add det remove to feed dict where appropriate
-            try:
-                for j in range(n_hidden):
-                    dr = graph.get_tensor_by_name("remove_{0}:0".format(j))
-                    fd[dr] = np.ones(dr.shape.as_list()[0])
-            except KeyError:
-                pass
-            activity.append(h.eval(feed_dict=fd))
-    return activity
-
-
 def indexing_matrix(triggers: np.ndarray, past: int, future: int, input_length: int):
     """
     Builds an indexing matrix from an vector of triggers
@@ -197,6 +153,28 @@ def indexing_matrix(triggers: np.ndarray, past: int, future: int, input_length: 
 
 
 # Classes
+class GradientStandards:
+    """
+    Lightweight wrapper of only standardizations used in a gradient data object
+    """
+    def __init__(self, temp_mean, temp_std, disp_mean, disp_std, ang_mean, ang_std):
+        """
+        Creates a new GradientStandards object
+        :param temp_mean: The temperature average
+        :param temp_std: The temperature standard deviation
+        :param disp_mean: The displacement average
+        :param disp_std: The displacement standard deviation
+        :param ang_mean: The angle average
+        :param ang_std: The angle standard
+        """
+        self.temp_mean = temp_mean
+        self.temp_std = temp_std
+        self.disp_mean = disp_mean
+        self.disp_std = disp_std
+        self.ang_mean = ang_mean
+        self.ang_std = ang_std
+
+
 class NotInitialized(Exception):
     def __init__(self, message):
         super().__init__(message)
@@ -581,6 +559,58 @@ class GpNetworkModel:
             rank_errors[i] = np.sum(np.abs(rank_real - rank_pred))
         return sq_errors, rank_errors
 
+    def unit_stimulus_responses(self, temperature, speed, angle, standardizations: GradientStandards) -> dict:
+        """
+        Computes and returns the responses of each unit in the network in response to a stimulus
+        :param temperature: The temperature stimulus in C (can be None for clamping to 0)
+        :param speed: The speed input in pixels per timestep (can be None for clamping to 0)
+        :param angle: The angle input in degrees per timestep (can be None for clamping to 0)
+        :param standardizations: Object that provides mean and standard deviation for each input
+        :return: Branch-wise dictionary of lists with n_hidden elements, each an array of time x n_units activations
+        """
+
+        self._check_init()
+        # ensure that at least one stimulus was provided that all have same size and standardize them
+        if any((temperature is not None, speed is not None, angle is not None)):
+            sizes = [x.size for x in (temperature, speed, angle) if x is not None]
+            if any([s != sizes[0] for s in sizes]):
+                raise ValueError("All given inputs must have same length")
+            if temperature is None:
+                temperature = np.zeros(sizes[0], np.float32)
+            else:
+                temperature = (temperature-standardizations.temp_mean) / standardizations.temp_std
+            if speed is None:
+                speed = np.zeros(sizes[0], np.float32)
+            else:
+                speed = (speed - standardizations.disp_mean) / standardizations.disp_std
+            if angle is None:
+                angle = np.zeros(sizes[0], np.float32)
+            else:
+                angle = (angle - standardizations.ang_mean) / standardizations.ang_std
+        else:
+            raise ValueError("At least one input needs to be given")
+        history = self.input_dims[2]
+        activity = {}
+
+        ix = indexing_matrix(np.arange(temperature.size), history - 1, 0, temperature.size)[0]
+        model_in = np.zeros((ix.shape[0], 3, history, 1))
+        model_in[:, 0, :, 0] = temperature[ix]
+        model_in[:, 1, :, 0] = speed[ix]
+        model_in[:, 2, :, 0] = angle[ix]
+        for b in self._branches:
+            if b == 'o':
+                activity[b] = [self.predict(model_in)]
+                continue
+            n_layers = self.n_layers_mixed if b == 'm' else self.n_layers_branch
+            for i in range(n_layers):
+                h = self._session.graph.get_tensor_by_name(self.cvn("HIDDEN", b, i)+":0")
+                fd = self._create_feed_dict(model_in, keep=1.0)
+                if b in activity:
+                    activity[b].append(h.eval(feed_dict=fd, session=self._session))
+                else:
+                    activity[b] = [h.eval(feed_dict=fd, session=self._session)]
+        return activity
+
     @staticmethod
     def cvn(vartype: str, branch: str, index: int) -> str:
         """
@@ -610,6 +640,14 @@ class GpNetworkModel:
         w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in to_get}
         b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
         return w, b
+
+    @property
+    def input_dims(self):
+        """
+        The network's input dimensions
+        """
+        self._check_init()
+        return self._x_in.shape.as_list()
 
 
 class RandCash:
@@ -760,28 +798,6 @@ class ModelData:
             return self.__data_files[item]
         else:
             raise KeyError("No checkpoint with index {0} found.".format(item))
-
-
-class GradientStandards:
-    """
-    Lightweight wrapper of only standardizations used in a gradient data object
-    """
-    def __init__(self, temp_mean, temp_std, disp_mean, disp_std, ang_mean, ang_std):
-        """
-        Creates a new GradientStandards object
-        :param temp_mean: The temperature average
-        :param temp_std: The temperature standard deviation
-        :param disp_mean: The displacement average
-        :param disp_std: The displacement standard deviation
-        :param ang_mean: The angle average
-        :param ang_std: The angle standard
-        """
-        self.temp_mean = temp_mean
-        self.temp_std = temp_std
-        self.disp_mean = disp_mean
-        self.disp_std = disp_std
-        self.ang_mean = ang_mean
-        self.ang_std = ang_std
 
 
 class GradientData:
