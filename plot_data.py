@@ -419,6 +419,34 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
             co.append(c)
         return [np.mean(sl)], [np.mean(ic)], [np.mean([co])]
 
+    def rank_errors(db_dict, temp_bins):
+        """
+        Computes prediction rank errors binned by temperature
+        :param db_dict: The debug dictionary with simulation information
+        :param temp_bins: The temperature bin edges in which to evaluate the rank errors
+        :return: temp_bins-1 long vector with the average rank errors in each bin
+        """
+        ct = db_dict["curr_temp"]
+        val = np.logical_not(np.isnan(ct))
+        pred = db_dict["pred_temp"][val, :]
+        tru = db_dict["true_temp"][val, :]
+        ct = ct[val]
+        avg_rank_errors = np.zeros(temp_bins.size - 1)
+        for i in range(temp_bins.size - 1):
+            in_bin = np.logical_and(ct >= temp_bins[i], ct < temp_bins[i + 1])
+            pib = pred[in_bin, :]
+            tib = tru[in_bin, :]
+            errsum = 0
+            for j in range(pib.shape[0]):
+                p_ranks = np.unique(pib[j, :], return_inverse=True)[1]
+                t_ranks = np.unique(tib[j, :], return_inverse=True)[1]
+                errsum += np.sum(np.abs(p_ranks - t_ranks))
+            if pib.shape[0] > 0:
+                avg_rank_errors[i] = errsum / pib.shape[0]
+            else:
+                avg_rank_errors[i] = np.nan
+        return avg_rank_errors
+
     # get fish and non-fish clusters based on user input
     all_clust = list(range(n_regs))
     fish = []
@@ -438,6 +466,8 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
     dists = None
     corrs = None
     slopes = None
+    r_errors = None
+    tbins = np.linspace(22, 37, 40)
     for nid in range(len(paths_512)):
         print("Network id = ", nid)
         bcents, results = sim_info(nid)
@@ -445,11 +475,13 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
             corrs = {k: [] for k in results.keys()}
             slopes = {k: [] for k in results.keys()}
             dists = {k: [] for k in results.keys()}
+            r_errors = {k: [] for k in results.keys()}
         for k in results.keys():
             s, _, c = prediction_stats(results[k][1])
             corrs[k] += c
             slopes[k] += s
             dists[k].append(results[k][0])
+            r_errors[k].append(rank_errors(results[k][1], tbins))
     # plot gradient distributions of models
     fig, ax = pl.subplots()
     for k in dists.keys():
@@ -467,6 +499,16 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
         ax.scatter(corrs[k], slopes[k], c=colors[k], label=labels[k], alpha=0.8)
     ax.set_xlabel("Correlation")
     ax.set_ylabel("Slope")
+    ax.legend()
+    sns.despine(fig, ax)
+    # plot temperature binned rank errors
+    tbc = tbins[:-1] + np.diff(tbins) / 2
+    fig, ax = pl.subplots()
+    for k in r_errors.keys():
+        sns.tsplot(r_errors[k], tbc, ax=ax, color=colors[k], estimator=np.nanmean)
+        ax.plot(tbc, np.nanmean(r_errors[k], 0), color=colors[k], label=labels[k])
+    ax.set_xlabel("Temperature")
+    ax.set_ylabel("Prediction rank error")
     ax.legend()
     sns.despine(fig, ax)
 
