@@ -15,7 +15,7 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, hidden_temperature_responses, GradientData, ca_convolve, FRAME_RATE
+from core import ModelData, GpNetworkModel, GradientData, ca_convolve, FRAME_RATE
 import h5py
 from sklearn.manifold import SpectralEmbedding
 from sklearn.cluster import SpectralClustering
@@ -34,7 +34,7 @@ def trial_average(mat, n_trials):
     return np.mean(mat.reshape((n_trials, t_length, mat.shape[1])), 0)
 
 
-def get_cell_responses(temp):
+def get_cell_responses(temp, standards):
     """
     Loads a model and computes the temperature response of all neurons returning response matrix
     :return: n-timepoints x m-neurons matrix of responses
@@ -46,11 +46,14 @@ def get_cell_responses(temp):
     model_dir = filedialog.askdirectory(title="Select directory with model checkpoints", initialdir="./model_data/")
     mdata = ModelData(model_dir)
     root.update()
+    # create our model and load from last checkpoint
+    gpn = GpNetworkModel()
+    gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     # prepend lead-in to stimulus
-    lead_in = np.full(mdata.get_input_dims()[2] - 1, np.mean(temp[:10]))
+    lead_in = np.full(gpn.input_dims[2] - 1, np.mean(temp[:10]))
     temp = np.r_[lead_in, temp]
-    activities = hidden_temperature_responses(mdata, mdata.LastCheckpoint, temp, m_temp, s_temp)
-    return np.hstack(activities)
+    activities = gpn.unit_stimulus_responses(temp, None, None, standards)
+    return np.hstack(activities['t']) if 't' in activities else np.hstack(activities['m'])
 
 
 def cluster_responses(response_mat, n_clusters, corr_cut=0.6):
@@ -96,9 +99,12 @@ if __name__ == "__main__":
         print("If using ipython activate TkAgg backend with '%matplotlib tk' and retry.")
         sys.exit(1)
     # load training data to obtain temperature scaling
-    train_data = GradientData.load("gd_training_data.hdf5")
-    m_temp = train_data.temp_mean
-    s_temp = train_data.temp_std
+    try:
+        std = GradientData.load_standards("gd_training_data.hdf5")
+    except IOError:
+        print("No standards found attempting to load full training data")
+        train_data = GradientData.load("gd_training_data.hdf5")
+        std = train_data.standards
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
@@ -106,7 +112,7 @@ if __name__ == "__main__":
     xinterp = np.linspace(0, tsin.size, tsin.size * FRAME_RATE // 20)
     temp = np.interp(xinterp, x, tsin)
     dfile.close()
-    all_cells = get_cell_responses(temp)
+    all_cells = get_cell_responses(temp, std)
     # convolve with 3s calcium kernel
     for i in range(all_cells.shape[1]):
         all_cells[:, i] = ca_convolve(all_cells[:, i], 3.0, FRAME_RATE)
