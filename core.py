@@ -11,6 +11,8 @@ import os
 from warnings import warn
 import numpy as np
 import h5py
+import matplotlib.pyplot as pl
+import seaborn as sns
 
 
 # Constants
@@ -610,6 +612,143 @@ class GpNetworkModel:
                 else:
                     activity[b] = [h.eval(feed_dict=fd, session=self._session)]
         return activity
+
+    @staticmethod
+    def plot_network(activations: dict, index: int):
+        """
+        Plots network structure with node darkness corresponding to its activation
+        :param activations: Dictionary of branches with layer activation lists
+        :param index: The frame in activations at which the network should be visualized
+        :return: figure and axes object
+        """
+        def circle_pos(rownum, colnum, n_rows, n_cols):
+            """
+            Compute the relative position of one circle within a layer
+            :param rownum: The row of the circle
+            :param colnum: The column of the circle
+            :param n_rows: The total number of rows in the layer
+            :param n_cols: The total number of columns in the layer
+            :return: The x,y position of the center
+            """
+            if rownum >= n_rows or colnum >= n_cols:
+                raise ValueError("Row and column numbers can't be larger than totals")
+            y_spread = (n_rows-1) * c_c_dist
+            y_pos = - y_spread / 2 + rownum * c_c_dist
+            x_spread = (n_cols-1) * c_c_dist
+            x_pos = - x_spread / 2 + colnum * c_c_dist
+            return x_pos, y_pos
+
+        def layer_dim(values: np.ndarray):
+            """
+            Computes the width and height of the layer bounding box
+            """
+            l_size = values.size
+            n_rows = (l_size - 1) // max_width + 1
+            n_cols = max_width if l_size >= max_width else l_size
+            boundx = 0 - (n_cols / 2) * (circle_dist + 2 * circle_rad) - circle_rad / 2
+            boundy = 0 - (n_rows / 2) * (circle_dist + 2 * circle_rad) - circle_rad / 2
+            boundw = (0 - boundx) * 2
+            boundh = (0 - boundy) * 2
+            return boundw, boundh
+
+        def draw_layer(x_center, y_center, values: np.ndarray):
+            """
+            Creates artists for one whole layer of the network
+            :param x_center: The x center coordinate of the layer
+            :param y_center: They y center coordinate of the layer
+            :param values: For each unit in the layer its normalized activation
+            :return:
+                [0] List of artists that draw this layer
+                [1] (xmin, xmax, ymin, ymax) tuple of rectangle containing this layer
+            """
+            if np.any(values > 1) or np.any(values < 0):
+                raise ValueError("values can't be smaller 0 or larger 1")
+            arts = []
+            l_size = values.size
+            n_rows = (l_size-1) // max_width + 1
+            n_cols = max_width if l_size >= max_width else l_size
+            # compute bounding rectangle
+            boundx = x_center - (n_cols / 2) * (circle_dist + 2*circle_rad) - circle_rad/2
+            boundy = y_center - (n_rows / 2) * (circle_dist + 2*circle_rad) - circle_rad/2
+            boundw = (x_center - boundx) * 2
+            boundh = (y_center - boundy) * 2
+            # draw units according to their activations
+            for i, v in enumerate(values):
+                x, y = circle_pos(i // max_width, i % max_width, n_rows, n_cols)
+                x += x_center
+                y += y_center
+                arts.append(pl.Circle((x, y), circle_rad, color=(1-v, 1-v, 1-v)))
+            return arts, (boundx, boundx+boundw, boundy, boundy+boundh)
+
+        # compute normalization across whole timeseries
+        max_width = 32  # maximum number of units in a row
+        circle_rad = 10  # radius of each given circle
+        circle_dist = 5  # the edge-to-edge distance of circles
+        c_c_dist = circle_dist + 2*circle_rad  # the center-to-center distance btw. neighboring circles
+        xcents = {'o': 0, 'm': 0, 't': -0.75*max_width*(c_c_dist+circle_rad), 's': 0,
+                  'a': 0.75*max_width*(c_c_dist+circle_rad)}
+        # the branch order from bottom to top
+        order = ['o', 'm', 't', 's', 'a']
+        # for each branch compute the y-center of its first layer
+        thickness = {}
+        for b in order:
+            if b not in activations:
+                thickness[b] = 0
+            else:
+                thickness[b] = 0
+                for l in activations[b]:
+                    thickness[b] += (layer_dim(l[index, :])[1] + c_c_dist * 2)
+        ystarts = {}
+        for b in order:
+            if b == 'o':
+                ystarts[b] = 0
+            elif b == 'm':
+                ystarts[b] = thickness[b] / 4
+            else:
+                ystarts[b] = ystarts['m'] + thickness['m'] + thickness[b] / 4
+        all_artists = []
+        fig_bounds = np.zeros(4)
+        for b in order:
+            if b not in activations:
+                continue
+            xc = xcents[b]
+            prev_offset = 0
+            for i, l in enumerate(activations[b]):
+                yc = ystarts[b] + prev_offset
+                prev_offset += layer_dim(l[index, :])[1] + c_c_dist
+                minval = np.min(l, 0)
+                diff = np.max(l, 0) - minval
+                diff[diff == 0] = 0.1
+                layer_arts, bounds = draw_layer(xc, yc, (l[index, :]-minval) / diff)
+                all_artists += layer_arts
+                # update figure bounds
+                if fig_bounds[0] > bounds[0]:
+                    fig_bounds[0] = bounds[0]
+                if fig_bounds[1] < bounds[1]:
+                    fig_bounds[1] = bounds[1]
+                if fig_bounds[2] > bounds[2]:
+                    fig_bounds[2] = bounds[2]
+                if fig_bounds[3] < bounds[3]:
+                    fig_bounds[3] = bounds[3]
+        # create actual figure
+        fig, ax = pl.subplots()
+        for a in all_artists:
+            ax.add_artist(a)
+        ax.axis('square')
+        # update limits
+        ax.set_xlim(fig_bounds[0], fig_bounds[1])
+        ax.set_ylim(fig_bounds[2], fig_bounds[3])
+        sns.despine(fig, ax, True, True, True, True)
+        ax.tick_params(
+            axis='both',
+            which='both',
+            bottom='off',
+            top='off',
+            right='off',
+            left='off',
+            labelbottom='off',
+            labelleft='off')
+        return fig, ax
 
     @staticmethod
     def cvn(vartype: str, branch: str, index: int) -> str:
