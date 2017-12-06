@@ -683,10 +683,10 @@ class GpNetworkModel:
         # compute normalization across whole timeseries
         max_width = 32  # maximum number of units in a row
         circle_rad = 10  # radius of each given circle
-        circle_dist = 5  # the edge-to-edge distance of circles
+        circle_dist = 7  # the edge-to-edge distance of circles
         c_c_dist = circle_dist + 2*circle_rad  # the center-to-center distance btw. neighboring circles
-        xcents = {'o': 0, 'm': 0, 't': -0.75*max_width*(c_c_dist+circle_rad), 's': 0,
-                  'a': 0.75*max_width*(c_c_dist+circle_rad)}
+        xcents = {'o': 0, 'm': 0, 't': -0.85*max_width*(c_c_dist+circle_rad), 's': 0,
+                  'a': 0.85*max_width*(c_c_dist+circle_rad)}
         # the branch order from bottom to top
         order = ['o', 'm', 't', 's', 'a']
         # for each branch compute the y-center of its first layer
