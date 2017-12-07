@@ -531,7 +531,7 @@ class GpNetworkModel:
         self._check_init()
         return self._sq_loss.eval(self._create_feed_dict(xbatch, ybatch, keep), self._session)
 
-    def predict(self, xbatch, keep=1.0, det_drop=None) -> tf.Tensor:
+    def predict(self, xbatch, keep=1.0, det_drop=None) -> np.ndarray:
         """
         Uses the network to predict output given the input
         :param xbatch: The network input
@@ -1254,17 +1254,15 @@ class ModelSimulation(TemperatureArena):
     Base class for simulations that use trained networks
     to perform gradient navigation
     """
-    def __init__(self, model: ModelData, chkpoint, tdata, t_preferred):
+    def __init__(self, model: GpNetworkModel, tdata, t_preferred):
         """
         Creates a new ModelSimulation
-        :param model: The ModelData describing our network model
-        :param chkpoint: The desired checkpoint file to use for the simulation
+        :param model: The network model to run the simulation
         :param tdata: Training data or related object to supply scaling information
         :param t_preferred: The preferred temperature that should be reached during the simulation
         """
         super().__init__()
         self.model = model
-        self.chkpoint = chkpoint
         self.t_preferred = t_preferred
         self.temp_mean = tdata.temp_mean
         self.temp_std = tdata.temp_std
@@ -1305,35 +1303,6 @@ class ModelSimulation(TemperatureArena):
     def max_pos(self):
         return None
 
-    @property
-    def model_file(self):
-        return self.model.ModelDefinition
-
-    def create_feed_dict(self, x_in, xvals, det_remove, keep_prob):
-        """
-        Creates a feeding dictionary for our model
-        :param x_in: Model variable of model inputs
-        :param xvals: The actual input values
-        :param det_remove: List of model tensors for deterministic removal
-        :param keep_prob: Model tensor of dropout probability
-        :return: The feeding dictionary for this model interation
-        """
-        fd = {x_in: xvals, keep_prob: 1.0}
-        if det_remove is None:
-            return fd
-        if self.remove is None:
-            for dr in det_remove:
-                fd[dr] = np.ones(dr.shape.as_list()[0])
-        else:
-            if len(det_remove) != len(self.remove):
-                raise ValueError("self.remove has a different amount of elements than hidden network layers")
-            for i, dr in enumerate(det_remove):
-                if self.remove[i].size == dr.shape.as_list()[0]:
-                    fd[dr] = self.remove[i]
-                else:
-                    raise ValueError("All elements of self.remove need to comply with hidden layer sizes")
-        return fd
-
     def run_simulation(self, nsteps, debug=False):
         """
         Runs gradient simulation using the neural network model
@@ -1356,66 +1325,49 @@ class ModelSimulation(TemperatureArena):
         start = history + 1
         pos = np.full((nsteps + burn_period, 3), np.nan)
         pos[:start + 1, :] = self.get_start_pos()[None, :]
-        # start session, load model and run simulation
-        tf.reset_default_graph()
-        with tf.Session() as sess:
-            saver = tf.train.import_meta_graph(self.model_file)
-            saver.restore(sess, self.chkpoint)
-            graph = tf.get_default_graph()
-            m_out = graph.get_tensor_by_name("m_out:0")
-            x_in = graph.get_tensor_by_name("x_in:0")
-            keep_prob = graph.get_tensor_by_name("keep_prob:0")
-            # obtain list of deterministic removal placeholders
-            n_hidden = self.model.get_n_hidden()
-            try:
-                det_remove = [graph.get_tensor_by_name("remove_{0}:0".format(i)) for i in range(n_hidden)]
-            except KeyError:
-                # this model was saved before adding deterministic removal of units
-                det_remove = None
-            # start simulation
-            step = start
-            model_in = np.zeros((1, 3, history, 1))
-            # overall bout frequency at ~1 Hz
-            p_eval = 1.0 / FRAME_RATE
-            while step < nsteps + burn_period:
-                if self._uni_cash.next_rand() > p_eval:
-                    pos[step, :] = pos[step-1, :]
-                    step += 1
-                    continue
-                model_in[0, 0, :, 0] = (self.temperature(pos[step - history:step, 0], pos[step - history:step, 1])
-                                        - self.temp_mean) / self.temp_std
-                spd = np.sqrt(np.sum(np.diff(pos[step - history - 1:step, 0:2], axis=0) ** 2, 1))
-                model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
-                dang = np.diff(pos[step - history - 1:step, 2], axis=0)
-                model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
-                fd = self.create_feed_dict(x_in, model_in, det_remove, keep_prob)
-                model_out = m_out.eval(feed_dict=fd).ravel()
-                if self.t_preferred is None:
-                    # to favor behavior towards center put action that results in lowest temperature first
-                    behav_ranks = np.argsort(model_out)
-                else:
-                    proj_diff = np.abs(model_out - (self.t_preferred - self.temp_mean)/self.temp_std)
-                    behav_ranks = np.argsort(proj_diff)
-                bt = self.select_behavior(behav_ranks)
-                if debug:
-                    dbpos = step - burn_period
-                    debug_dict["curr_temp"][dbpos] = model_in[0, 0, -1, 0] * self.temp_std + self.temp_mean
-                    debug_dict["pred_temp"][dbpos, :] = model_out * self.temp_std + self.temp_mean
-                    debug_dict["sel_behav"][dbpos] = bt
-                    for i, b in enumerate(self.btypes):
-                        fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
-                        t_out[i] = self.temperature(fpos[0], fpos[1])
-                    debug_dict["true_temp"][dbpos, :] = t_out
-                if bt == "N":
-                    pos[step, :] = pos[step - 1, :]
-                    step += 1
-                    continue
-                traj = self.get_bout_trajectory(pos[step-1, :], bt)
-                if step + self.blen <= nsteps + burn_period:
-                    pos[step:step + self.blen, :] = traj
-                else:
-                    pos[step:, :] = traj[:pos[step:, :].shape[0], :]
-                step += self.blen
+        # run simulation
+        step = start
+        model_in = np.zeros((1, 3, history, 1))
+        # overall bout frequency at ~1 Hz
+        p_eval = 1.0 / FRAME_RATE
+        while step < nsteps + burn_period:
+            if self._uni_cash.next_rand() > p_eval:
+                pos[step, :] = pos[step-1, :]
+                step += 1
+                continue
+            model_in[0, 0, :, 0] = (self.temperature(pos[step - history:step, 0], pos[step - history:step, 1])
+                                    - self.temp_mean) / self.temp_std
+            spd = np.sqrt(np.sum(np.diff(pos[step - history - 1:step, 0:2], axis=0) ** 2, 1))
+            model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
+            dang = np.diff(pos[step - history - 1:step, 2], axis=0)
+            model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
+            model_out = self.model.predict(model_in, 1.0, self.remove)
+            if self.t_preferred is None:
+                # to favor behavior towards center put action that results in lowest temperature first
+                behav_ranks = np.argsort(model_out)
+            else:
+                proj_diff = np.abs(model_out - (self.t_preferred - self.temp_mean)/self.temp_std)
+                behav_ranks = np.argsort(proj_diff)
+            bt = self.select_behavior(behav_ranks)
+            if debug:
+                dbpos = step - burn_period
+                debug_dict["curr_temp"][dbpos] = model_in[0, 0, -1, 0] * self.temp_std + self.temp_mean
+                debug_dict["pred_temp"][dbpos, :] = model_out * self.temp_std + self.temp_mean
+                debug_dict["sel_behav"][dbpos] = bt
+                for i, b in enumerate(self.btypes):
+                    fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                    t_out[i] = self.temperature(fpos[0], fpos[1])
+                debug_dict["true_temp"][dbpos, :] = t_out
+            if bt == "N":
+                pos[step, :] = pos[step - 1, :]
+                step += 1
+                continue
+            traj = self.get_bout_trajectory(pos[step-1, :], bt)
+            if step + self.blen <= nsteps + burn_period:
+                pos[step:step + self.blen, :] = traj
+            else:
+                pos[step:, :] = traj[:pos[step:, :].shape[0], :]
+            step += self.blen
         if debug:
             return pos[burn_period:, :], debug_dict
         return pos[burn_period:, :]
