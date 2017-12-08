@@ -13,25 +13,24 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, GradientData, ModelSimulation
+from core import ModelData, GradientData, ModelSimulation, GpNetworkModel
 
 
 class CircleGradSimulation(ModelSimulation):
     """
     Implements a nn-Model based gradient navigation simulation
     """
-    def __init__(self, model: ModelData, chkpoint, tdata, radius, t_min, t_max, t_preferred=None):
+    def __init__(self, model: GpNetworkModel, tdata, radius, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
-        :param model: The ModelData describing our network model
-        :param chkpoint: The model checkpoint containing the trained data (.ckpt)
+        :param model: The network model to run the simulation
         :param tdata: Object that cotains training normalizations of model inputs
         :param radius: The arena radius
         :param t_min: The center temperature
         :param t_max: The edge temperature
         :param t_preferred: The preferred temperature or None to prefer minimum
         """
-        super().__init__(model, chkpoint, tdata, t_preferred)
+        super().__init__(model, tdata, t_preferred)
         self.radius = radius
         self.t_min = t_min
         self.t_max = t_max
@@ -65,11 +64,10 @@ class LinearGradientSimulation(ModelSimulation):
     """
     Implements a nn-Model based linear gradient navigation simulation
     """
-    def __init__(self, model, chkpoint, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
+    def __init__(self, model: GpNetworkModel, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
-        :param model: The ModelData describing our network model
-        :param chkpoint: The model checkpoint containing the trained data (.ckpt)
+        :param model: The network model to run the simulation
         :param tdata: Object that cotains training normalizations of model inputs
         :param xmax: The maximum x-position (gradient direction)
         :param ymax: The maximum y-position (neutral direction)
@@ -77,7 +75,7 @@ class LinearGradientSimulation(ModelSimulation):
         :param t_max: The x=xmax temperature
         :param t_preferred: The preferred temperature or None to prefer minimum
         """
-        super().__init__(model, chkpoint, tdata, t_preferred)
+        super().__init__(model, tdata, t_preferred)
         self.xmax = xmax
         self.ymax = ymax
         self.t_min = t_min
@@ -161,21 +159,26 @@ if __name__ == "__main__":
     model_dir = filedialog.askdirectory(title="Select directory with model checkpoints", initialdir="./model_data/")
     root.update()
     mdata = ModelData(model_dir)
-    train_data = GradientData.load("gd_training_data.hdf5")
+    # load training data for scaling
+    try:
+        std = GradientData.load_standards("gd_training_data.hdf5")
+    except IOError:
+        print("No standards found attempting to load full training data")
+        std = GradientData.load("gd_training_data.hdf5").standards
     sim_type = ""
     while sim_type != "l" and sim_type != "r":
         sim_type = input("Please select either (l)inear or (r)adial simulation [l/r]:")
+    gpn_naive = GpNetworkModel()
+    gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
+    gpn_trained = GpNetworkModel()
+    gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     if sim_type == "l":
         sim_type = "x"  # so we call run_simulation correctly later
-        sim_naive = LinearGradientSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37,
-                                             TPREFERRED)
-        sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22,
-                                               37, TPREFERRED)
+        sim_naive = LinearGradientSimulation(gpn_naive, std, 100, 100, 22, 37, TPREFERRED)
+        sim_trained = LinearGradientSimulation(gpn_trained, std, 100, 100, 22, 37, TPREFERRED)
     else:
-        sim_naive = CircleGradSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 22, 37,
-                                         TPREFERRED)
-        sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37,
-                                           TPREFERRED)
+        sim_naive = CircleGradSimulation(gpn_naive, std, 100, 22, 37, TPREFERRED)
+        sim_trained = CircleGradSimulation(gpn_trained, std, 100, 22, 37, TPREFERRED)
     b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
     b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
     b_ideal, h_ideal = run_simulation(sim_trained, n_steps, True, sim_type)[1:]
