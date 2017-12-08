@@ -1341,7 +1341,7 @@ class ModelSimulation(TemperatureArena):
             model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
             dang = np.diff(pos[step - history - 1:step, 2], axis=0)
             model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
-            model_out = self.model.predict(model_in, 1.0, self.remove)
+            model_out = self.model.predict(model_in, 1.0, self.remove).ravel()
             if self.t_preferred is None:
                 # to favor behavior towards center put action that results in lowest temperature first
                 behav_ranks = np.argsort(model_out)
