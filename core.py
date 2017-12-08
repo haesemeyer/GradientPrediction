@@ -190,7 +190,6 @@ class GpNetworkModel:
         """
         Creates a new GpNetworkModel
         """
-        tf.reset_default_graph()
         self.initialized = False
         # set training defaults
         self.w_decay = 1e-4
@@ -206,6 +205,8 @@ class GpNetworkModel:
         self._n_mixed_dense = None
         self._n_branch_dense = None
         self._branches = None
+        # our graph object
+        self._graph = None  # type: tf.Graph
         # our session object
         self._session = None  # type: tf.Session
         # model fields that are later needed for parameter feeding
@@ -351,6 +352,7 @@ class GpNetworkModel:
         :param n_layers_branch: The number of hidden layers in each branch (can be 0 for full mixing)
         :param n_layers_mixed: The number of hidden layers in the mixed part of the model
         """
+        self.clear()
         # ingest parameters
         if n_layers_mixed < 1:
             raise ValueError("Network needs at least on mixed hidden layer")
@@ -365,56 +367,57 @@ class GpNetworkModel:
             self.n_units = n_units
         self.n_layers_branch = n_layers_branch
         self.n_layers_mixed = n_layers_mixed
-        self.clear()
         self._create_unit_lists()
-        # create deterministic removal units
-        for b in self._branches:
-            if b == 'm':
-                self._det_remove[b] = [tf.placeholder(tf.float32, shape=[self._n_mixed_dense[i]],
-                                                      name=self.cvn("REMOVE", b, i))
-                                       for i in range(self.n_layers_mixed)]
+        self._graph = tf.Graph()
+        with self._graph.as_default():
+            # create deterministic removal units
+            for b in self._branches:
+                if b == 'm':
+                    self._det_remove[b] = [tf.placeholder(tf.float32, shape=[self._n_mixed_dense[i]],
+                                                          name=self.cvn("REMOVE", b, i))
+                                           for i in range(self.n_layers_mixed)]
+                else:
+                    self._det_remove[b] = [tf.placeholder(tf.float32, shape=[self._n_branch_dense[i]],
+                                                          name=self.cvn("REMOVE", b, i))
+                                           for i in range(self.n_layers_branch)]
+            # dropout probability placeholder
+            self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
+            # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
+            self._x_in = tf.placeholder(tf.float32, [None, 3, FRAME_RATE * HIST_SECONDS, 1], "x_in")
+            # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
+            self._y_ = tf.placeholder(tf.float32, [None, 4], "y_")
+            # data binning layer
+            xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
+            # the input convolution depends on the network structure: branched or fully mixed
+            if 't' in self._branches:
+                # branched network - split input into temperature, speed and angle
+                x_1, x_2, x_3 = tf.split(xin_pool, num_or_size_splits=3, axis=1, name="input_split")
+                # create convolution and deep layer for each branch
+                time = self._create_convolution_layer('t', x_1)
+                time = self._create_branch('t', time)
+                speed = self._create_convolution_layer('s', x_2)
+                speed = self._create_branch('s', speed)
+                angle = self._create_convolution_layer('a', x_3)
+                angle = self._create_branch('a', angle)
+                # combine branch outputs and create mix branch
+                mix = tf.concat([time, speed, angle], 1, self.cvn("HIDDEN", 'm', -1))
+                mix = self._create_branch('m', mix)
             else:
-                self._det_remove[b] = [tf.placeholder(tf.float32, shape=[self._n_branch_dense[i]],
-                                                      name=self.cvn("REMOVE", b, i))
-                                       for i in range(self.n_layers_branch)]
-        # dropout probability placeholder
-        self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
-        # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
-        self._x_in = tf.placeholder(tf.float32, [None, 3, FRAME_RATE * HIST_SECONDS, 1], "x_in")
-        # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
-        self._y_ = tf.placeholder(tf.float32, [None, 4], "y_")
-        # data binning layer
-        xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
-        # the input convolution depends on the network structure: branched or fully mixed
-        if 't' in self._branches:
-            # branched network - split input into temperature, speed and angle
-            x_1, x_2, x_3 = tf.split(xin_pool, num_or_size_splits=3, axis=1, name="input_split")
-            # create convolution and deep layer for each branch
-            time = self._create_convolution_layer('t', x_1)
-            time = self._create_branch('t', time)
-            speed = self._create_convolution_layer('s', x_2)
-            speed = self._create_branch('s', speed)
-            angle = self._create_convolution_layer('a', x_3)
-            angle = self._create_branch('a', angle)
-            # combine branch outputs and create mix branch
-            mix = tf.concat([time, speed, angle], 1, self.cvn("HIDDEN", 'm', -1))
-            mix = self._create_branch('m', mix)
-        else:
-            # fully mixed network
-            mix = self._create_convolution_layer('m', xin_pool)
-            mix = self._create_branch('m', mix)
-        self._m_out = self._create_output(mix)
-        # create and store losses and training step
-        self._total_loss, self._sq_loss = get_loss(self._y_, self._m_out)
-        self._train_step = create_train_step(self._total_loss)
-        # store our training operation
-        tf.add_to_collection('train_op', self._train_step)
-        # create session
-        self._session = tf.Session()
-        # mark network as initialized
-        self.initialized = True
-        # intialize all variables
-        self.init_variables()
+                # fully mixed network
+                mix = self._create_convolution_layer('m', xin_pool)
+                mix = self._create_branch('m', mix)
+            self._m_out = self._create_output(mix)
+            # create and store losses and training step
+            self._total_loss, self._sq_loss = get_loss(self._y_, self._m_out)
+            self._train_step = create_train_step(self._total_loss)
+            # store our training operation
+            tf.add_to_collection('train_op', self._train_step)
+            # create session
+            self._session = tf.Session()
+            # mark network as initialized
+            self.initialized = True
+            # intialize all variables
+            self.init_variables()
 
     def load(self, meta_file: str, checkpoint_file: str):
         """
@@ -423,52 +426,54 @@ class GpNetworkModel:
         :param checkpoint_file: The saved model checkpoint (weights, etc.)
         """
         self.clear()
-        # restore graph and variables
-        self._session = tf.Session()
-        saver = tf.train.import_meta_graph(meta_file)
-        saver.restore(self._session, checkpoint_file)
-        graph = self._session.graph
-        self._m_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
-        self._x_in = graph.get_tensor_by_name("x_in:0")
-        self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
-        self._y_ = graph.get_tensor_by_name("y_:0")
-        # collect deterministic removal units and use these to determine which branches exist and how many layers they
-        # have
-        possible_branches = ['t', 's', 'a', 'm', 'o']
-        self._branches = []
-        self._det_remove = {}
-        for b in possible_branches:
-            try:
-                graph.get_tensor_by_name(self.cvn("REMOVE", b, 0)+":0")
-                # we found layer 0 in this branch so it exists
-                self._branches.append(b)
-                self._det_remove[b] = []
-                i = 0
+        self._graph = tf.Graph()
+        with self._graph.as_default():
+            # restore graph and variables
+            self._session = tf.Session()
+            saver = tf.train.import_meta_graph(meta_file)
+            saver.restore(self._session, checkpoint_file)
+            graph = self._session.graph
+            self._m_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
+            self._x_in = graph.get_tensor_by_name("x_in:0")
+            self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
+            self._y_ = graph.get_tensor_by_name("y_:0")
+            # collect deterministic removal units and use these to determine which branches exist and how many layers they
+            # have
+            possible_branches = ['t', 's', 'a', 'm', 'o']
+            self._branches = []
+            self._det_remove = {}
+            for b in possible_branches:
                 try:
-                    while True:
-                        self._det_remove[b].append(graph.get_tensor_by_name(self.cvn("REMOVE", b, i)+":0"))
-                        i += 1
+                    graph.get_tensor_by_name(self.cvn("REMOVE", b, 0)+":0")
+                    # we found layer 0 in this branch so it exists
+                    self._branches.append(b)
+                    self._det_remove[b] = []
+                    i = 0
+                    try:
+                        while True:
+                            self._det_remove[b].append(graph.get_tensor_by_name(self.cvn("REMOVE", b, i)+":0"))
+                            i += 1
+                    except KeyError:
+                        pass
                 except KeyError:
-                    pass
-            except KeyError:
-                continue
-        if 't' in self._branches:
-            self.n_layers_branch = len(self._det_remove['t'])
-        else:
-            self.n_layers_branch = 0
-        self.n_units = [0, 0]
-        self.n_layers_mixed = len(self._det_remove['m'])
-        self._n_mixed_dense = [self._det_remove['m'][i].shape[0].value for i in range(self.n_layers_mixed)]
-        self.n_units[1] = self._n_mixed_dense[0]
-        if self.n_layers_branch > 0:
-            self._n_branch_dense = [self._det_remove['t'][i].shape[0].value for i in range(self.n_layers_branch)]
-            self.n_units[0] = self._n_branch_dense[0]
-        else:
-            self._n_branch_dense = []
-        # retrieve training step
-        self._train_step = graph.get_collection("train_op")[0]
-        # set up squared loss calculation
-        self._sq_loss = tf.losses.mean_squared_error(labels=self._y_, predictions=self._m_out)
+                    continue
+            if 't' in self._branches:
+                self.n_layers_branch = len(self._det_remove['t'])
+            else:
+                self.n_layers_branch = 0
+            self.n_units = [0, 0]
+            self.n_layers_mixed = len(self._det_remove['m'])
+            self._n_mixed_dense = [self._det_remove['m'][i].shape[0].value for i in range(self.n_layers_mixed)]
+            self.n_units[1] = self._n_mixed_dense[0]
+            if self.n_layers_branch > 0:
+                self._n_branch_dense = [self._det_remove['t'][i].shape[0].value for i in range(self.n_layers_branch)]
+                self.n_units[0] = self._n_branch_dense[0]
+            else:
+                self._n_branch_dense = []
+            # retrieve training step
+            self._train_step = graph.get_collection("train_op")[0]
+            # set up squared loss calculation
+            self._sq_loss = tf.losses.mean_squared_error(labels=self._y_, predictions=self._m_out)
         self.initialized = True
 
     def clear(self):
@@ -481,8 +486,8 @@ class GpNetworkModel:
         if self._session is not None:
             self._session.close()
             self._session = None
+        self._graph = None
         self._saver = None
-        tf.reset_default_graph()
         self.n_conv_layers = None
         self.n_units = None
         self.n_layers_branch = None
@@ -495,7 +500,8 @@ class GpNetworkModel:
         Runs global variable initializer, resetting all values
         """
         self._check_init()
-        self._session.run(tf.global_variables_initializer())
+        with self._graph.as_default():
+            self._session.run(tf.global_variables_initializer())
 
     def save_state(self, chkpoint_file, index, save_meta=True) -> str:
         """
@@ -506,9 +512,10 @@ class GpNetworkModel:
         :return: The full chkpoint filename and path
         """
         self._check_init()
-        if self._saver is None:
-            self._saver = tf.train.Saver(max_to_keep=None)  # never delete chkpoint files
-        return self._saver.save(self._session, chkpoint_file, global_step=index, write_meta_graph=save_meta)
+        with self._graph.as_default():
+            if self._saver is None:
+                self._saver = tf.train.Saver(max_to_keep=None)  # never delete chkpoint files
+            return self._saver.save(self._session, chkpoint_file, global_step=index, write_meta_graph=save_meta)
 
     def train(self, xbatch, ybatch, keep=0.5):
         """
@@ -518,7 +525,8 @@ class GpNetworkModel:
         :param keep: The keep probability of each unit
         """
         self._check_init()
-        self._train_step.run(self._create_feed_dict(xbatch, ybatch, keep), self._session)
+        with self._graph.as_default():
+            self._train_step.run(self._create_feed_dict(xbatch, ybatch, keep), self._session)
 
     def get_squared_loss(self, xbatch, ybatch, keep=1) -> float:
         """
@@ -529,7 +537,8 @@ class GpNetworkModel:
         :return: The square loss
         """
         self._check_init()
-        return self._sq_loss.eval(self._create_feed_dict(xbatch, ybatch, keep), self._session)
+        with self._graph.as_default():
+            return self._sq_loss.eval(self._create_feed_dict(xbatch, ybatch, keep), self._session)
 
     def predict(self, xbatch, keep=1.0, det_drop=None) -> np.ndarray:
         """
@@ -540,7 +549,8 @@ class GpNetworkModel:
         :return: The network output
         """
         self._check_init()
-        return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop), session=self._session)
+        with self._graph.as_default():
+            return self._m_out.eval(self._create_feed_dict(xbatch, keep=keep, removal=det_drop), session=self._session)
 
     def test_error_distributions(self, test_data):
         """
@@ -550,15 +560,16 @@ class GpNetworkModel:
             [1]: For each datapoint in test_data the rank error
         """
         self._check_init()
-        sq_errors = np.full(test_data.data_size, -1)
-        rank_errors = np.full(test_data.data_size, -1)
-        for i in range(test_data.data_size):
-            xbatch, ybatch = test_data.training_batch(1)
-            pred = self.predict(xbatch, 1.0)
-            sq_errors[i] = (np.sum((ybatch - pred) ** 2))
-            rank_real = np.unique(ybatch, return_inverse=True)[1]
-            rank_pred = np.unique(pred, return_inverse=True)[1]
-            rank_errors[i] = np.sum(np.abs(rank_real - rank_pred))
+        with self._graph.as_default():
+            sq_errors = np.full(test_data.data_size, -1)
+            rank_errors = np.full(test_data.data_size, -1)
+            for i in range(test_data.data_size):
+                xbatch, ybatch = test_data.training_batch(1)
+                pred = self.predict(xbatch, 1.0)
+                sq_errors[i] = (np.sum((ybatch - pred) ** 2))
+                rank_real = np.unique(ybatch, return_inverse=True)[1]
+                rank_pred = np.unique(pred, return_inverse=True)[1]
+                rank_errors[i] = np.sum(np.abs(rank_real - rank_pred))
         return sq_errors, rank_errors
 
     def unit_stimulus_responses(self, temperature, speed, angle, standardizations: GradientStandards) -> dict:
@@ -572,46 +583,47 @@ class GpNetworkModel:
         """
 
         self._check_init()
-        # ensure that at least one stimulus was provided that all have same size and standardize them
-        if any((temperature is not None, speed is not None, angle is not None)):
-            sizes = [x.size for x in (temperature, speed, angle) if x is not None]
-            if any([s != sizes[0] for s in sizes]):
-                raise ValueError("All given inputs must have same length")
-            if temperature is None:
-                temperature = np.zeros(sizes[0], np.float32)
-            else:
-                temperature = (temperature-standardizations.temp_mean) / standardizations.temp_std
-            if speed is None:
-                speed = np.zeros(sizes[0], np.float32)
-            else:
-                speed = (speed - standardizations.disp_mean) / standardizations.disp_std
-            if angle is None:
-                angle = np.zeros(sizes[0], np.float32)
-            else:
-                angle = (angle - standardizations.ang_mean) / standardizations.ang_std
-        else:
-            raise ValueError("At least one input needs to be given")
-        history = self.input_dims[2]
-        activity = {}
-
-        ix = indexing_matrix(np.arange(temperature.size), history - 1, 0, temperature.size)[0]
-        model_in = np.zeros((ix.shape[0], 3, history, 1))
-        model_in[:, 0, :, 0] = temperature[ix]
-        model_in[:, 1, :, 0] = speed[ix]
-        model_in[:, 2, :, 0] = angle[ix]
-        for b in self._branches:
-            if b == 'o':
-                activity[b] = [self.predict(model_in)]
-                continue
-            n_layers = self.n_layers_mixed if b == 'm' else self.n_layers_branch
-            for i in range(n_layers):
-                h = self._session.graph.get_tensor_by_name(self.cvn("HIDDEN", b, i)+":0")
-                fd = self._create_feed_dict(model_in, keep=1.0)
-                if b in activity:
-                    activity[b].append(h.eval(feed_dict=fd, session=self._session))
+        with self._graph.as_default():
+            # ensure that at least one stimulus was provided that all have same size and standardize them
+            if any((temperature is not None, speed is not None, angle is not None)):
+                sizes = [x.size for x in (temperature, speed, angle) if x is not None]
+                if any([s != sizes[0] for s in sizes]):
+                    raise ValueError("All given inputs must have same length")
+                if temperature is None:
+                    temperature = np.zeros(sizes[0], np.float32)
                 else:
-                    activity[b] = [h.eval(feed_dict=fd, session=self._session)]
-        return activity
+                    temperature = (temperature-standardizations.temp_mean) / standardizations.temp_std
+                if speed is None:
+                    speed = np.zeros(sizes[0], np.float32)
+                else:
+                    speed = (speed - standardizations.disp_mean) / standardizations.disp_std
+                if angle is None:
+                    angle = np.zeros(sizes[0], np.float32)
+                else:
+                    angle = (angle - standardizations.ang_mean) / standardizations.ang_std
+            else:
+                raise ValueError("At least one input needs to be given")
+            history = self.input_dims[2]
+            activity = {}
+
+            ix = indexing_matrix(np.arange(temperature.size), history - 1, 0, temperature.size)[0]
+            model_in = np.zeros((ix.shape[0], 3, history, 1))
+            model_in[:, 0, :, 0] = temperature[ix]
+            model_in[:, 1, :, 0] = speed[ix]
+            model_in[:, 2, :, 0] = angle[ix]
+            for b in self._branches:
+                if b == 'o':
+                    activity[b] = [self.predict(model_in)]
+                    continue
+                n_layers = self.n_layers_mixed if b == 'm' else self.n_layers_branch
+                for i in range(n_layers):
+                    h = self._session.graph.get_tensor_by_name(self.cvn("HIDDEN", b, i)+":0")
+                    fd = self._create_feed_dict(model_in, keep=1.0)
+                    if b in activity:
+                        activity[b].append(h.eval(feed_dict=fd, session=self._session))
+                    else:
+                        activity[b] = [h.eval(feed_dict=fd, session=self._session)]
+            return activity
 
     @staticmethod
     def plot_network(activations: dict, index: int):
@@ -771,13 +783,14 @@ class GpNetworkModel:
         The weights and biases of the convolution layer(s)
         """
         self._check_init()
-        if 't' in self._branches:
-            to_get = ['t', 's', 'a']
-        else:
-            to_get = ['m']
-        g = self._session.graph
-        w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in to_get}
-        b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
+        with self._graph.as_default():
+            if 't' in self._branches:
+                to_get = ['t', 's', 'a']
+            else:
+                to_get = ['m']
+            g = self._session.graph
+            w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in to_get}
+            b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
         return w, b
 
     @property
@@ -786,7 +799,8 @@ class GpNetworkModel:
         The network's input dimensions
         """
         self._check_init()
-        return self._x_in.shape.as_list()
+        with self._graph.as_default():
+            return self._x_in.shape.as_list()
 
 
 class RandCash:
