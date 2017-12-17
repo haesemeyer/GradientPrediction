@@ -23,12 +23,13 @@ PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 
 
 
 # Functions
-def ca_convolve(trace, ca_timeconstant, frame_rate):
+def ca_convolve(trace, ca_timeconstant, frame_rate, kernel=None):
     """
     Convolves a trace with a decaying calcium kernel
     :param trace: The activity trace to convolve
     :param ca_timeconstant: The timeconstant of the calcium indicator
     :param frame_rate: The original frame-rate to relate samples to the time constant
+    :param kernel: Optionally a pre-computed kernel in which case ca_timeconstant and frame_rate will be ignored
     :return: The convolved trace
     """
 
@@ -44,9 +45,10 @@ def ca_convolve(trace, ca_timeconstant, frame_rate):
         k = k / k.sum()
         return k
 
-    if ca_timeconstant == 0:
+    if ca_timeconstant == 0 and kernel is None:
         return trace
-    kernel = ca_kernel(ca_timeconstant, frame_rate)
+    if kernel is None:
+        kernel = ca_kernel(ca_timeconstant, frame_rate)
     return np.convolve(trace, kernel)[:trace.size]
 
 
