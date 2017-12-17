@@ -15,21 +15,19 @@ import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
 from gradientSimulation import run_simulation, CircleGradSimulation, LinearGradientSimulation
-from core import ModelData, GradientData, hidden_temperature_responses, FRAME_RATE, ca_convolve
+from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 
 
 # file definitions
-base_path = "./model_data/Adam_1e-4/"
+base_path = "./model_data/Adam_1e-4/separateInput/"
 
-path_256 = "170829_NH_256_256_256/"
-path_1024 = "170829_NH_1024_1024_1024/"
-path_2048 = "170829_NH_2048_2048_2048/"
-paths_512 = [f+'/' for f in os.listdir(base_path) if "512_512_512" in f]
+paths_1024 = [f+'/' for f in os.listdir(base_path) if "_3m1024_" in f]
+paths_512 = [f+'/' for f in os.listdir(base_path) if "_3m512_" in f]
 # simulation globals
 n_steps = 2000000
-TPREFERRED = 29.5
+TPREFERRED = 26
 
 
 def loss_file(path):
@@ -59,15 +57,12 @@ def test_loss(fname):
 
 def plot_squared_losses():
     # assume timepoints same for all
-    test_time, test_256 = test_loss(loss_file(path_256))[:2]
+    test_time = test_loss(loss_file(paths_512[0]))[0]
     test_512 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_512]), 0)
-    test_1024 = test_loss(loss_file(path_1024))[1]
-    test_2048 = test_loss(loss_file(path_2048))[1]
+    test_1024 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_1024]), 0)
     fig, ax = pl.subplots()
-    ax.plot(test_time, np.log10(gaussian_filter1d(test_256, 10)), "C0.", label="256 HU")
     ax.plot(test_time, np.log10(gaussian_filter1d(test_512, 10)), "C1.", label="512 HU")
     ax.plot(test_time, np.log10(gaussian_filter1d(test_1024, 10)), "C2.", label="1024 HU")
-    ax.plot(test_time, np.log10(gaussian_filter1d(test_2048, 10)), "C3.", label="2048 HU")
     epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
     for e in epoch_times:
         ax.plot([e, e], [-1.5, -0.5], 'k--', lw=0.5)
@@ -79,21 +74,19 @@ def plot_squared_losses():
 
 def plot_rank_losses():
     # assume timepoints same for all
-    out = test_loss(loss_file(path_256))
-    test_time, test_256 = out[0], out[2]
+    test_time = test_loss(loss_file(paths_512[0]))[0]
     test_512 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_512]), 0)
-    test_1024 = test_loss(loss_file(path_1024))[2]
-    test_2048 = test_loss(loss_file(path_2048))[2]
+    test_1024 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_1024]), 0)
     fig, ax = pl.subplots()
-    ax.plot(test_time, gaussian_filter1d(test_256, 10), "C0.", label="256 HU")
-    ax.plot(test_time, gaussian_filter1d(test_512, 10), "C1.", label="512 HU")
-    ax.plot(test_time, gaussian_filter1d(test_1024, 10), "C2.", label="1024 HU")
-    ax.plot(test_time, gaussian_filter1d(test_2048, 10), "C3.", label="2048 HU")
+    ax.plot(test_time, gaussian_filter1d(test_512, 2), "C1.", label="512 HU")
+    ax.plot(test_time, gaussian_filter1d(test_1024, 2), "C2.", label="1024 HU")
     epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
     for e in epoch_times:
-        ax.plot([e, e], [1.5, 4], 'k--', lw=0.5)
+        ax.plot([e, e], [0, 5.1], 'k--', lw=0.5)
+    ax.plot(test_time, np.full_like(test_time, 5), 'k--', label="Chance")
     ax.set_ylabel("Rank test error")
     ax.set_xlabel("Training step")
+    ax.set_ylim(0, 5.1)
     ax.legend()
     sns.despine()
 
@@ -115,18 +108,22 @@ def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
         [4]: The occupancy of a unit dropped model if drop_list is provided, None otherwise
     """
     mdata = ModelData(path)
+    gpn_naive = GpNetworkModel()
+    gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
+    gpn_trained = GpNetworkModel()
+    gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     if sim_type == "l":
         sim_type = "x"
-        sim_naive = LinearGradientSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
-        sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+        sim_naive = LinearGradientSimulation(gpn_naive, train_data, 100, 100, 22, 37, TPREFERRED)
+        sim_trained = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
         if drop_list is not None:
-            sim_drop = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_drop = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
             sim_drop.remove = drop_list
     else:
-        sim_naive = CircleGradSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 22, 37, TPREFERRED)
-        sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+        sim_naive = CircleGradSimulation(gpn_naive, train_data, 100, 22, 37, TPREFERRED)
+        sim_trained = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
         if drop_list is not None:
-            sim_drop = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_drop = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
             sim_drop.remove = drop_list
     b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
     b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
@@ -139,28 +136,26 @@ def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
     return b_naive, h_naive, h_trained, h_ideal, h_drop
 
 
-def plot_sim(train_data, sim_type):
+def plot_sim(train_data_stds, sim_type):
     all_n = []
-    bins, n_256, t_256, ideal = do_simulation(mpath(path_256), train_data, sim_type, True)[:4]
-    all_n.append(n_256)
     t_512 = []
+    t_1024 = []
+    bins = None
     for p in paths_512:
-        _, n, t = do_simulation(mpath(p), train_data, sim_type, False)[:3]
+        bins, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
         all_n.append(n)
         t_512.append(t)
     t_512 = np.mean(np.vstack(t_512), 0)
-    _, n_1024, t_1024 = do_simulation(mpath(path_1024), train_data, sim_type, False)[:3]
-    all_n.append(n_1024)
-    _, n_2048, t_2048 = do_simulation(mpath(path_2048), train_data, sim_type, False)[:3]
-    all_n.append(n_2048)
+    for p in paths_1024:
+        _, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
+        all_n.append(n)
+        t_1024.append(t)
+    t_1024 = np.mean(np.vstack(t_1024), 0)
     all_n = np.mean(np.vstack(all_n), 0)
     fig, ax = pl.subplots()
-    ax.plot(bins, t_256, lw=2, label="256 HU")
     ax.plot(bins, t_512, lw=2, label="512 HU")
     ax.plot(bins, t_1024, lw=2, label="1024 HU")
-    ax.plot(bins, t_2048, lw=2, label="2048 HU")
     ax.plot(bins, all_n, "k", lw=2, label="Naive")
-    ax.plot(bins, ideal, "k--", label="Ideal")
     ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'C4--')
     ax.set_ylim(0)
     ax.legend()
@@ -180,15 +175,17 @@ def get_cell_responses(model_dir, temp, network_id):
         [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
     """
     mdata = ModelData(model_dir)
+    gpn = GpNetworkModel()
+    gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     # prepend lead-in to stimulus
-    lead_in = np.full(mdata.get_input_dims()[2] - 1, np.mean(temp[:10]))
+    lead_in = np.full(gpn.input_dims[2] - 1, np.mean(temp[:10]))
     temp = np.r_[lead_in, temp]
-    activities = hidden_temperature_responses(mdata, mdata.LastCheckpoint, temp, tdata.temp_mean, tdata.temp_std)
+    activities = gpn.unit_stimulus_responses(temp, None, None, std)['t']
     activities = np.hstack(activities)
     # build id matrix
     id_mat = np.zeros((3, activities.shape[1]), dtype=np.int32)
     id_mat[0, :] = network_id
-    hidden_sizes = mdata.get_hidden_sizes()
+    hidden_sizes = [gpn.n_units[0]] * gpn.n_layers_branch
     start = 0
     for i, hs in enumerate(hidden_sizes):
         id_mat[1, start:start + hs] = i
@@ -219,7 +216,7 @@ def create_det_drop_list(network_id, cluster_ids, unit_ids, clust_to_drop, shuff
         if shuffle:
             np.random.shuffle(drop)
         det_drop.append(drop)
-    return det_drop
+    return {'t': det_drop}
 
 
 def plot_512sim_w_drop(train_data, sim_type, clust_do_drop, shuffle):
@@ -261,12 +258,14 @@ def plot_sim_debug(path, train_data, sim_type, drop_list=None):
         [1]: The debug dict
     """
     mdata = ModelData(path)
+    gp_trained = GpNetworkModel()
+    gp_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     if sim_type == "l":
-        sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+        sim_trained = LinearGradientSimulation(gp_trained, train_data, 100, 100, 22, 37, TPREFERRED)
         if drop_list is not None:
             sim_trained.remove = drop_list
     else:
-        sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+        sim_trained = CircleGradSimulation(gp_trained, train_data, 100, 22, 37, TPREFERRED)
         if drop_list is not None:
             sim_trained.remove = drop_list
     all_pos, db_dict = sim_trained.run_simulation(n_steps, True)
@@ -363,25 +362,27 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
         nonlocal fish
         nonlocal non_fish
         mdata = ModelData(mpath(paths_512[net_id]))
+        gpn_naive = GpNetworkModel()
+        gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
+        gpn_trained = GpNetworkModel()
+        gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
         if sim_type == "l":
-            sim_naive = LinearGradientSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_trained = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37,
-                                                   TPREFERRED)
-            sim_fish = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_naive = LinearGradientSimulation(gpn_naive, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_trained = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_fish = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
             sim_fish.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
-            sim_nonfish = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37,
-                                                   TPREFERRED)
+            sim_nonfish = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
             sim_nonfish.remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
-            sim_shuff = LinearGradientSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 100, 22, 37, TPREFERRED)
+            sim_shuff = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
             sim_shuff.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
         else:
-            sim_naive = CircleGradSimulation(mdata, mdata.FirstCheckpoint, train_data, 100, 22, 37, TPREFERRED)
-            sim_trained = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
-            sim_fish = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_naive = CircleGradSimulation(gpn_naive, train_data, 100, 22, 37, TPREFERRED)
+            sim_trained = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
+            sim_fish = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
             sim_fish.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
-            sim_nonfish = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_nonfish = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
             sim_nonfish.remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
-            sim_shuff = CircleGradSimulation(mdata, mdata.LastCheckpoint, train_data, 100, 22, 37, TPREFERRED)
+            sim_shuff = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
             sim_shuff.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
         pos_naive, db_naive = sim_naive.run_simulation(n_steps, True)
         pos_trained, db_trained = sim_trained.run_simulation(n_steps, True)
@@ -448,6 +449,7 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
         return avg_rank_errors
 
     # get fish and non-fish clusters based on user input
+    global n_regs
     all_clust = list(range(n_regs))
     fish = []
     failed = True
@@ -511,6 +513,7 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
     ax.set_ylabel("Prediction rank error")
     ax.legend()
     sns.despine(fig, ax)
+# def plot_fish_nonfish_analysis
 
 
 if __name__ == "__main__":
@@ -518,9 +521,13 @@ if __name__ == "__main__":
     plot_squared_losses()
     plot_rank_losses()
     # load training data for scaling
-    tdata = GradientData.load("gd_training_data.hdf5")
+    try:
+        std = GradientData.load_standards("gd_training_data.hdf5")
+    except IOError:
+        print("No standards found attempting to load full training data")
+        std = GradientData.load("gd_training_data.hdf5").standards
     # plot radial sim results
-    plot_sim(tdata, "r")
+    plot_sim(std, "r")
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
@@ -537,14 +544,28 @@ if __name__ == "__main__":
         all_ids.append(ids)
     all_cells = np.hstack(all_cells)
     all_ids = np.hstack(all_ids)
-    # convolve with 3s calcium kernel
+    # convolve all activity with the MTA derived nuclear Gcamp6s calcium kernel
+    # we want to put network activity "on same footing" as imaging data
+    tau_on = 1.4  # seconds
+    tau_on *= FRAME_RATE  # in frames
+    tau_off = 2  # seconds
+    tau_off *= FRAME_RATE  # in frames
+    kframes = np.arange(10 * FRAME_RATE)  # 10 s long kernel
+    kernel = 2**(-kframes / tau_off) * (1 - 2**(-kframes / tau_on))
+    kernel = kernel / kernel.sum()
+    # convolve with our kernel
     for i in range(all_cells.shape[1]):
-        all_cells[:, i] = ca_convolve(all_cells[:, i], 3.0, FRAME_RATE)
+        all_cells[:, i] = ca_convolve(all_cells[:, i], 0, 0, kernel)
     # perform spectral clustering
     n_regs = 8
     clust_ids, coords = cluster_responses(all_cells, n_regs)
     # trial average the "cells"
     all_cells = trial_average(all_cells, 3)
+
+    # collect cluster-average activities
+    cluster_acts = np.zeros((all_cells.shape[0], n_regs))
+    for i in range(n_regs):
+        cluster_acts[:, i] = np.mean(all_cells[:, clust_ids == i], 1)
 
     # plot spectral embedding and cluster average activity
     fig = pl.figure()
@@ -554,7 +575,7 @@ if __name__ == "__main__":
     fig, (ax_on, ax_off) = pl.subplots(ncols=2)
     time = np.arange(all_cells.shape[0]) / FRAME_RATE
     for i in range(n_regs):
-        act = np.mean(all_cells[:, clust_ids == i], 1)
+        act = cluster_acts[:, i]
         if np.corrcoef(act, temperature[:act.size])[0, 1] < 0:
             sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_off)
         else:
