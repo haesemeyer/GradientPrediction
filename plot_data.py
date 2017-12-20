@@ -25,6 +25,7 @@ base_path = "./model_data/Adam_1e-4/separateInput/"
 
 paths_1024 = [f+'/' for f in os.listdir(base_path) if "_3m1024_" in f]
 paths_512 = [f+'/' for f in os.listdir(base_path) if "_3m512_" in f]
+paths_256 = [f+'/' for f in os.listdir(base_path) if "_3m256_" in f]
 # simulation globals
 n_steps = 2000000
 TPREFERRED = 26
@@ -58,11 +59,13 @@ def test_loss(fname):
 def plot_squared_losses():
     # assume timepoints same for all
     test_time = test_loss(loss_file(paths_512[0]))[0]
+    test_256 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_256]), 0)
     test_512 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_512]), 0)
     test_1024 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_1024]), 0)
     fig, ax = pl.subplots()
-    ax.plot(test_time, np.log10(gaussian_filter1d(test_512, 10)), "C1.", label="512 HU")
-    ax.plot(test_time, np.log10(gaussian_filter1d(test_1024, 10)), "C2.", label="1024 HU")
+    ax.plot(test_time, np.log10(gaussian_filter1d(test_256, 2)), "C0.", label="256 HU")
+    ax.plot(test_time, np.log10(gaussian_filter1d(test_512, 2)), "C1.", label="512 HU")
+    ax.plot(test_time, np.log10(gaussian_filter1d(test_1024, 2)), "C2.", label="1024 HU")
     epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
     for e in epoch_times:
         ax.plot([e, e], [-1.5, -0.5], 'k--', lw=0.5)
@@ -75,9 +78,11 @@ def plot_squared_losses():
 def plot_rank_losses():
     # assume timepoints same for all
     test_time = test_loss(loss_file(paths_512[0]))[0]
+    test_256 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_256]), 0)
     test_512 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_512]), 0)
     test_1024 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_1024]), 0)
     fig, ax = pl.subplots()
+    ax.plot(test_time, gaussian_filter1d(test_256, 2), "C0.", label="256 HU")
     ax.plot(test_time, gaussian_filter1d(test_512, 2), "C1.", label="512 HU")
     ax.plot(test_time, gaussian_filter1d(test_1024, 2), "C2.", label="1024 HU")
     epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
@@ -138,9 +143,15 @@ def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
 
 def plot_sim(train_data_stds, sim_type):
     all_n = []
+    t_256 = []
     t_512 = []
     t_1024 = []
     bins = None
+    for p in paths_256:
+        bins, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
+        all_n.append(n)
+        t_256.append(t)
+    t_256 = np.mean(np.vstack(t_256), 0)
     for p in paths_512:
         bins, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
         all_n.append(n)
@@ -153,6 +164,7 @@ def plot_sim(train_data_stds, sim_type):
     t_1024 = np.mean(np.vstack(t_1024), 0)
     all_n = np.mean(np.vstack(all_n), 0)
     fig, ax = pl.subplots()
+    ax.plot(bins, t_256, lw=2, label="256 HU")
     ax.plot(bins, t_512, lw=2, label="512 HU")
     ax.plot(bins, t_1024, lw=2, label="1024 HU")
     ax.plot(bins, all_n, "k", lw=2, label="Naive")
