@@ -1432,3 +1432,130 @@ class ModelSimulation(TemperatureArena):
                 pos[step:, :] = traj[:pos[step:, :].shape[0], :]
             step += self.blen
         return pos[burn_period:, :]
+
+
+class WhiteNoiseSimulation(TemperatureArena):
+    """
+    Class to perform white noise analysis of network models
+    """
+    def __init__(self, stds: GradientStandards, model: GpNetworkModel, base_freq=1.0, stim_mean=0.0, stim_std=1.0):
+        """
+        Creates a new WhiteNoiseSimulation object
+        :param stds: Standardization for displacement used in model training
+        :param model: The network to use for the simulation (has to be initialized)
+        :param base_freq: The baseline movement frequency in Hz
+        :param stim_mean: The white noise stimulus average
+        :param stim_std: The white noise stimulus standard deviation
+        """
+        super().__init__()
+        self.p_move = base_freq / FRAME_RATE
+        self.model = model
+        # for stimulus we do not generate real temperatures anyway so user selects parameters
+        self.stim_mean = stim_mean
+        self.stim_std = stim_std
+        # for behaviors they need to be standardized according to training data
+        self.disp_mean = stds.disp_mean
+        self.disp_std = stds.disp_std
+        self.ang_mean = stds.ang_mean
+        self.ang_std = stds.ang_std
+        self.btypes = ["N", "S", "L", "R"]
+        # optional removal of network units
+        self.remove = None
+
+    # Private API
+    def _get_bout(self, bout_type: str):
+        """
+        For a given bout-type computes and returns the displacement and delta-heading trace
+        """
+        if bout_type not in self.btypes:
+            raise ValueError("bout_type has to be one of {0}".format(self.btypes))
+        if bout_type == "S":
+            da = self._str_cash.next_rand()
+        elif bout_type == "L":
+            da = -1 * self._trn_cash.next_rand()
+        else:
+            da = self._trn_cash.next_rand()
+        delta_heading = np.zeros(self.blen)
+        delta_heading[0] = da
+        disp = self._disp_cash.next_rand()
+        displacement = np.full(self.blen, disp / self.blen)
+        return displacement, delta_heading
+
+    def _select_behavior(self, ranks):
+        """
+        Given a ranking of choices returns the bout type identifier to perform
+        """
+        decider = self._uni_cash.next_rand()
+        if decider < 0.5:
+            return self.btypes[ranks[0]]
+        elif decider < 0.75:
+            return self.btypes[ranks[1]]
+        elif decider < 0.875:
+            return self.btypes[ranks[2]]
+        else:
+            return self.btypes[ranks[3]]
+
+    # Public API
+    def compute_openloop_behavior(self, stimulus: np.ndarray):
+        """
+        Presents stimulus in open-loop to network and returns behavior traces
+        :param stimulus: The stimulus to present to the network
+        :return:
+            [0]: Behavior instantiations (-1: none, 0: stay, 1: straight, 2: left, 3: right)
+            [1]: Speed trace
+            [2]: Angle trace
+        """
+        history = HIST_SECONDS*FRAME_RATE
+        step = history
+        model_in = np.zeros((1, 3, history, 1))
+        behav_types = np.full(stimulus.size, -1, np.int8)
+        speed_trace = np.zeros_like(stimulus)
+        angle_trace = np.zeros_like(stimulus)
+        while step < stimulus.size:
+            # first invoke the bout clock and pass if we shouldn't select a behavior
+            if self._uni_cash.next_rand() > self.p_move:
+                step += 1
+                continue
+            model_in[0, 0, :, 0] = stimulus[step - history:step]
+            model_in[0, 1, :, 0] = (speed_trace[step - history:step] - self.disp_mean) / self.disp_std
+            model_in[0, 2, :, 0] = (angle_trace[step - history:step] - self.ang_mean) / self.ang_std
+            model_out = self.model.predict(model_in, 1.0, self.remove).ravel()
+            behav_ranks = np.argsort(model_out)
+            bt = self._select_behavior(behav_ranks)
+            if bt == "N":
+                behav_types[step] = 0
+                step += 1
+                continue
+            elif bt == "S":
+                behav_types[step] = 1
+            elif bt == "L":
+                behav_types[step] = 2
+            else:
+                behav_types[step] = 3
+            disp, dh = self._get_bout(bt)
+            if step + self.blen <= stimulus.size:
+                speed_trace[step:step + self.blen] = disp
+                angle_trace[step:step + self.blen] = dh
+            else:
+                speed_trace[step:] = disp[:speed_trace[step:].size]
+                angle_trace[step:] = dh[:angle_trace[step:].size]
+            step += self.blen
+        return behav_types, speed_trace, angle_trace
+
+    def compute_behavior_kernels(self, n_samples=1e6):
+        """
+        Generates white-noise samples and presents them as an open-loop stimulus to the network computing filter kernels
+        :param n_samples: The number of white-noise samples to use
+        :return:
+            [0]: Stay kernel (all kernels go HIST_SECONDS*FRAME_RATE into the past and FRAME_RATE into the future)
+            [1]: Straight kernel
+            [2]: Left kernel
+            [3]: Right kernel
+        """
+        def kernel(t):
+            indices = np.arange(n_samples)[btype_trace == t]
+            ixm = indexing_matrix(indices, HIST_SECONDS*FRAME_RATE, FRAME_RATE, int(n_samples))[0]
+            return np.mean(stim[ixm], 0)
+        stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
+        btype_trace = self.compute_openloop_behavior(stim)[0]
+        return kernel(0), kernel(1), kernel(2), kernel(3)
