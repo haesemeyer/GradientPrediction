@@ -21,7 +21,7 @@ import os
 
 
 # file definitions
-base_path = "./model_data/Adam_1e-4/separateInput/"
+base_path = "./model_data/Adam_1e-4/sepInput_mixTrain/"
 
 paths_1024 = [f+'/' for f in os.listdir(base_path) if "_3m1024_" in f]
 paths_512 = [f+'/' for f in os.listdir(base_path) if "_3m512_" in f]
