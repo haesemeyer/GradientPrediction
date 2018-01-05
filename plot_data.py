@@ -15,9 +15,10 @@ import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
 from gradientSimulation import run_simulation, CircleGradSimulation, LinearGradientSimulation
-from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve
+from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation
 from analyzeTempResponses import trial_average, cluster_responses
 import os
+from pandas import DataFrame
 
 
 # file definitions
@@ -369,6 +370,19 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
             bin_centers = sim_naive.temperature(bin_centers, np.zeros_like(bin_centers))
             return bin_centers, h
 
+        def temp_error(all_pos):
+            nonlocal sim_type
+            nonlocal sim_naive
+            temp_pos = sim_naive.temperature(all_pos[:, 0], all_pos[:, 1])
+            if sim_type == "r":
+                # form a weighted average, considering points of larger radius less since just by
+                # chance they will be visited more often
+                weights = 1 / np.sqrt(np.sum(all_pos[:, :2], 1)**2)
+                sum_of_weights = np.nansum(weights)
+                weighted_sum = np.nansum(np.sqrt((temp_pos - TPREFERRED)**2) * weights)
+                return weighted_sum / sum_of_weights
+            return np.mean(np.sqrt((temp_pos - TPREFERRED)**2))
+
         nonlocal sim_type
         nonlocal train_data
         nonlocal fish
@@ -403,12 +417,18 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
         pos_shuff, db_shuff = sim_shuff.run_simulation(n_steps, True)
         bins = np.linspace(0, sim_naive.max_pos, 100)
         bc, h_naive = bin_pos(pos_naive)
+        e_naive = temp_error(pos_naive)
         h_trained = bin_pos(pos_trained)[1]
+        e_trained = temp_error(pos_trained)
         h_fish = bin_pos(pos_fish)[1]
+        e_fish = temp_error(pos_fish)
         h_nonfish = bin_pos(pos_nonfish)[1]
+        e_nonfish = temp_error(pos_nonfish)
         h_shuff = bin_pos(pos_shuff)[1]
-        return bc, {"naive": (h_naive, db_naive), "trained": (h_trained, db_trained), "fish": (h_fish, db_fish),
-                    "nonfish": (h_nonfish, db_nonfish), "shuffle": (h_shuff, db_shuff)}
+        e_shuff = temp_error(pos_shuff)
+        return bc, {"naive": (h_naive, db_naive, e_naive), "trained": (h_trained, db_trained, e_trained),
+                    "fish": (h_fish, db_fish, e_fish), "nonfish": (h_nonfish, db_nonfish, e_nonfish),
+                    "shuffle": (h_shuff, db_shuff, e_shuff)}
 
     def prediction_stats(db_dict):
         """
@@ -481,6 +501,7 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
     corrs = None
     slopes = None
     r_errors = None
+    grad_errors = None
     tbins = np.linspace(22, 37, 40)
     for nid in range(len(paths_512)):
         print("Network id = ", nid)
@@ -490,12 +511,14 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
             slopes = {k: [] for k in results.keys()}
             dists = {k: [] for k in results.keys()}
             r_errors = {k: [] for k in results.keys()}
+            grad_errors = {k: [] for k in results.keys()}
         for k in results.keys():
             s, _, c = prediction_stats(results[k][1])
             corrs[k] += c
             slopes[k] += s
             dists[k].append(results[k][0])
             r_errors[k].append(rank_errors(results[k][1], tbins))
+            grad_errors[k].append(results[k][2])
     # plot gradient distributions of models
     fig, ax = pl.subplots()
     for k in dists.keys():
@@ -506,6 +529,13 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
     ax.set_xlabel("Temperature")
     ax.set_ylabel("Occupancy")
     ax.legend()
+    sns.despine(fig, ax)
+    # plot gradient position errors of models
+    fig, ax = pl.subplots()
+    dframe = DataFrame(grad_errors)
+    sns.boxplot(data=dframe, order=["naive", "trained", "shuffle", "fish", "nonfish"])
+    ax.set_ylabel("Average gradient position error [C]")
+    ax.set_ylim(0)
     sns.despine(fig, ax)
     # plot scatter of prediction quality
     fig, ax = pl.subplots()
@@ -605,3 +635,30 @@ if __name__ == "__main__":
     ax.set_ylabel("Cluster size")
     ax.set_xlabel("Cluster number")
     sns.despine(fig, ax)
+
+    # plot white noise analysis of networks
+    behav_kernels = {}
+    k_names = ["stay", "straight", "left", "right"]
+    for p in paths_512:
+        mdata = ModelData(mpath(p))
+        gpn = GpNetworkModel()
+        gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+        wna = WhiteNoiseSimulation(std, gpn)
+        kernels = wna.compute_behavior_kernels(10000000)
+        for i, n in enumerate(k_names):
+            if n in behav_kernels:
+                behav_kernels[n].append(kernels[i])
+            else:
+                behav_kernels[n] = [kernels[i]]
+    kernel_time = np.linspace(-4, 1, behav_kernels['straight'][0].size)
+    for n in k_names:
+        behav_kernels[n] = np.vstack(behav_kernels[n])
+    fig, ax = pl.subplots()
+    for i, n in enumerate(k_names):
+        sns.tsplot(behav_kernels[n], kernel_time, n_boot=1000, color="C{0}".format(i), ax=ax)
+        ax.plot(kernel_time, np.mean(behav_kernels[n], 0), color="C{0}".format(i), label=n)
+    ax.set_ylabel("Filter kernel")
+    ax.set_xlabel("Time around bout [s]")
+    ax.legend()
+    sns.despine(fig, ax)
+
