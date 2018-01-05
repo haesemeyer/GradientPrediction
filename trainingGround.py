@@ -24,7 +24,7 @@ EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluat
 SEPARATE = True
 
 if SEPARATE:
-    N_UNITS = [512, 1024]
+    N_UNITS = [512, 512]
     N_BRANCH = 2
     N_MIXED = 3
     N_CONV = 40
@@ -39,7 +39,7 @@ else:
 
 def train_one(batch, net_model: GpNetworkModel):
     # save variables every 10000 steps but don't re-save model-meta
-    if global_count != 0 and global_count % 20000 == 0:
+    if global_count != 0 and global_count % 50000 == 0:
         path = net_model.save_state(chk_file, global_count, False)
         print("Model saved in file: %s" % path)
     xbatch = batch[0]
