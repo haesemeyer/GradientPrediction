@@ -439,8 +439,8 @@ class GpNetworkModel:
             self._x_in = graph.get_tensor_by_name("x_in:0")
             self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
             self._y_ = graph.get_tensor_by_name("y_:0")
-            # collect deterministic removal units and use these to determine which branches exist and how many layers they
-            # have
+            # collect deterministic removal units and use these
+            # to determine which branches exist and how many layers they have
             possible_branches = ['t', 's', 'a', 'm', 'o']
             self._branches = []
             self._det_remove = {}
@@ -477,6 +477,9 @@ class GpNetworkModel:
             # set up squared loss calculation
             self._sq_loss = tf.losses.mean_squared_error(labels=self._y_, predictions=self._m_out)
         self.initialized = True
+        # use convolution data biases to get number of convolution layers
+        conv_biases = self.convolution_data[1]
+        self.n_conv_layers = conv_biases.popitem()[1].shape[0]
 
     def clear(self):
         """
