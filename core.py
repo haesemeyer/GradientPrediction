@@ -630,6 +630,28 @@ class GpNetworkModel:
                         activity[b] = [h.eval(feed_dict=fd, session=self._session)]
             return activity
 
+    def branch_output(self, branch_name, xbatch, det_drop=None) -> np.ndarray:
+        """
+        Computes the activations of all units in the last hidden layer of the given branch
+        :param branch_name: The name of the branch ('t', 's', 'a', 'm')
+        :param xbatch: The network input
+        :param det_drop: The deterministic keep/drop of each unit
+        :return: The activations of the last layer of reach branch for the given inputs
+        """
+        self._check_init()
+        if branch_name not in self._branches:
+            raise ValueError("Branch '{0}' is not present in this network. Has to be one of {1}".format(branch_name,
+                                                                                                        self._branches))
+        # obtain the name of the last hidden layer of the given branch
+        tensor_name = self.cvn("HIDDEN", branch_name,
+                               self.n_layers_branch-1 if branch_name != 'm' else self.n_layers_mixed-1)
+        tensor_name = tensor_name + ":0"
+        with self._graph.as_default():
+            fd = self._create_feed_dict(xbatch, removal=det_drop)
+            tensor = self._graph.get_tensor_by_name(tensor_name)
+            layer_out = tensor.eval(fd, session=self._session)
+        return layer_out
+
     @staticmethod
     def plot_network(activations: dict, index: int):
         """
