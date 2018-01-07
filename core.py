@@ -1459,6 +1459,97 @@ class ModelSimulation(TemperatureArena):
         return pos[burn_period:, :]
 
 
+class CircleGradSimulation(ModelSimulation):
+    """
+    Implements a nn-Model based gradient navigation simulation
+    """
+    def __init__(self, model: GpNetworkModel, tdata, radius, t_min, t_max, t_preferred=None):
+        """
+        Creates a new ModelGradSimulation
+        :param model: The network model to run the simulation
+        :param tdata: Object that cotains training normalizations of model inputs
+        :param radius: The arena radius
+        :param t_min: The center temperature
+        :param t_max: The edge temperature
+        :param t_preferred: The preferred temperature or None to prefer minimum
+        """
+        super().__init__(model, tdata, t_preferred)
+        self.radius = radius
+        self.t_min = t_min
+        self.t_max = t_max
+        # set range of starting positions to more sensible default
+        self.maxstart = self.radius
+
+    def temperature(self, x, y):
+        """
+        Returns the temperature at the given positions
+        """
+        r = np.sqrt(x**2 + y**2)  # this is a circular arena so compute radius
+        return (r / self.radius) * (self.t_max - self.t_min) + self.t_min
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        # circular arena, compute radial position of point and compare to arena radius
+        r = np.sqrt(x**2 + y**2)
+        return r > self.radius
+
+    @property
+    def max_pos(self):
+        return self.radius
+
+
+class LinearGradientSimulation(ModelSimulation):
+    """
+    Implements a nn-Model based linear gradient navigation simulation
+    """
+    def __init__(self, model: GpNetworkModel, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
+        """
+        Creates a new ModelGradSimulation
+        :param model: The network model to run the simulation
+        :param tdata: Object that cotains training normalizations of model inputs
+        :param xmax: The maximum x-position (gradient direction)
+        :param ymax: The maximum y-position (neutral direction)
+        :param t_min: The x=0 temperature
+        :param t_max: The x=xmax temperature
+        :param t_preferred: The preferred temperature or None to prefer minimum
+        """
+        super().__init__(model, tdata, t_preferred)
+        self.xmax = xmax
+        self.ymax = ymax
+        self.t_min = t_min
+        self.t_max = t_max
+        # set range of starting positions to more sensible default
+        self.maxstart = max(self.xmax, self.ymax)
+
+    def temperature(self, x, y):
+        """
+        Returns the temperature at the given positions
+        """
+        return (x / self.xmax) * (self.t_max - self.t_min) + self.t_min
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        if x < 0 or x > self.xmax:
+            return True
+        if y < 0 or y > self.ymax:
+            return True
+        return False
+
+    @property
+    def max_pos(self):
+        return self.xmax
+
+
 class WhiteNoiseSimulation(TemperatureArena):
     """
     Class to perform white noise analysis of network models
