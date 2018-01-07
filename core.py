@@ -1370,7 +1370,7 @@ class ModelSimulation(TemperatureArena):
         step = start
         model_in = np.zeros((1, 3, history, 1))
         # overall bout frequency at ~1 Hz
-        p_eval = 1.0 / FRAME_RATE
+        p_eval = self.p_move
         while step < nsteps + burn_period:
             if self._uni_cash.next_rand() > p_eval:
                 pos[step, :] = pos[step-1, :]
@@ -1427,7 +1427,7 @@ class ModelSimulation(TemperatureArena):
         pos[:start + 1, :] = self.get_start_pos()[None, :]
         step = start
         # overall bout frequency at ~1 Hz
-        p_eval = 1.0 / FRAME_RATE
+        p_eval = self.p_move
         t_out = np.zeros(4)
         while step < nsteps + burn_period:
             if self._uni_cash.next_rand() > p_eval:
