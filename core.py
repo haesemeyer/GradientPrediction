@@ -1719,9 +1719,9 @@ class BoutFrequencyEvolver(CircleGradSimulation):
             net_pos.append(p)
         steps = np.full(self.n_networks, start)  # for each simulation its current step
         # to avoid network queries we only evaluate bout frequencies of networks every ~ 20 steps
-        last_bf_eval = np.full_like(steps, -np.inf)  # for each network the last step in which bf was evaluated
+        last_bf_eval = np.full_like(steps, -100)  # for each network the last step in which bf was evaluated
         bf_eval_model_in = np.zeros((self.n_networks, 3, history, 1))  # model input to evaluate bfreq across networks
-        bfreqs = np.full_like(steps, self.p_move)  # initialize all bout frequencies to base value
+        bfreqs = np.full(self.n_networks, self.p_move)  # initialize all bout frequencies to base value
         while np.all(steps < nsteps + burn_period):  # run until first network is finished
             if np.all(steps-last_bf_eval >= 20) or np.any(steps-last_bf_eval >= 50):
                 # newly evaluate bout frequencies
@@ -1736,7 +1736,8 @@ class BoutFrequencyEvolver(CircleGradSimulation):
                 # apply non-linearity
                 bfreqs = 1 / (1 + np.exp(-bfreqs))  # [0, 1]
                 bfreqs = (2 - 0.5) * bfreqs + 0.5  # [0.5, 2]
-                last_bf_eval = steps  # update indicator
+                bfreqs /= FRAME_RATE  # turn into probability
+                last_bf_eval = steps.copy()  # update indicator
             # determine which networks should move in this step - one decider draw for all
             d = self._uni_cash.next_rand()
             non_movers = np.nonzero(d > bfreqs)[0]
@@ -1780,7 +1781,9 @@ class BoutFrequencyEvolver(CircleGradSimulation):
         For each network runs simulation and rates the error as the average temperature distance
         from the desired temperature weighted by the inverse of the radius
         :param nsteps: The number of simulation steps to (approximately) perform for each network
-        :return: Average deviation from desired temperature for each network
+        :return:
+            [0]: Average deviation from desired temperature for each network
+            [1]: List of position traces of each network
         """
         net_pos = self.run_simulation(nsteps)
         error_scores = np.full(self.n_networks, np.nan)
@@ -1792,7 +1795,7 @@ class BoutFrequencyEvolver(CircleGradSimulation):
             assert not np.isnan(weighted_sum)
             assert not np.isnan(sum_of_weights)
             error_scores[i] = weighted_sum / sum_of_weights
-        return error_scores
+        return error_scores, net_pos
 
     def next_generation(self, sel_index: np.ndarray, mut_std=0.1):
         """
@@ -1831,13 +1834,14 @@ class BoutFrequencyEvolver(CircleGradSimulation):
         :param mut_std: The standard deviation of mutation noise (if <=0 no mutation is performed)
         :return:
             [0]: The current errors
-            [1]: The updated weights
+            [1]: The networ positions during simulation
+            [2]: The updated weights
         """
-        errors = self.score_networks(n_eval_steps)
+        errors, net_pos = self.score_networks(n_eval_steps)
         ranks = np.argsort(errors)
         top = ranks[:self.n_sel_best]
         other = np.random.choice(ranks[self.n_sel_best:], self.n_sel_random, replace=False)
-        return errors, self.next_generation(np.r_[top, other], mut_std)
+        return errors, net_pos, self.next_generation(np.r_[top, other], mut_std)
 
     @property
     def n_networks(self):
