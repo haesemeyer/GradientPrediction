@@ -1675,3 +1675,180 @@ class WhiteNoiseSimulation(TemperatureArena):
         stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
         btype_trace = self.compute_openloop_behavior(stim)[0]
         return kernel(0), kernel(1), kernel(2), kernel(3)
+
+
+class BoutFrequencyEvolver(CircleGradSimulation):
+    """
+    Class to obtain parameters that turn the output of the temperature branch of a GpNetworkModel into a bout frequency
+    such that gradient navigation efficiency will be maximised by running an evolutionary algorithm
+    """
+    def __init__(self, stds: GradientStandards, model: GpNetworkModel, n_sel_best=10, n_sel_random=6, n_progeny=2):
+        """
+        Creates a new BoutFrequencyEvolver
+        :param stds: Data standardizations
+        :param model: The network model to use
+        :param n_sel_best: The number of top performing networks to select for each next generation
+        :param n_sel_random: The number of not top performing networks to select for each next generation
+        :param n_progeny: For each network pairing the number of child networks to produce
+        """
+        super().__init__(model, stds, 100, 22, 37, 26)
+        self.model_branch = 't'
+        self.n_sel_best = n_sel_best
+        self.n_sel_random = n_sel_random
+        self.n_progeny = n_progeny
+        self.weight_mat = np.random.randn(self.n_networks, self.n_weights)
+        self.generation = 0
+
+    def run_ideal(self, nsteps, pfail=0.0):
+        raise NotImplementedError("Function removed in this class")
+
+    def run_simulation(self, nsteps, debug=False):
+        """
+        Runs simulation across all networks in a quasi-parallel manner
+        :param nsteps: The number of simulation steps to perform
+        :param debug: IGNORED
+        :return: Returns a list of position arrays for each network
+        """
+        history = FRAME_RATE * HIST_SECONDS
+        burn_period = history * 2
+        start = history + 1
+        net_pos = []
+        for i in range(self.n_networks):
+            p = np.full((nsteps + burn_period, 3), np.nan)
+            p[:start + 1, :] = self.get_start_pos()[None, :]
+            net_pos.append(p)
+        steps = np.full(self.n_networks, start)  # for each simulation its current step
+        # to avoid network queries we only evaluate bout frequencies of networks every ~ 20 steps
+        last_bf_eval = np.full_like(steps, -np.inf)  # for each network the last step in which bf was evaluated
+        bf_eval_model_in = np.zeros((self.n_networks, 3, history, 1))  # model input to evaluate bfreq across networks
+        bfreqs = np.full_like(steps, self.p_move)  # initialize all bout frequencies to base value
+        while np.all(steps < nsteps + burn_period):  # run until first network is finished
+            if np.all(steps-last_bf_eval >= 20) or np.any(steps-last_bf_eval >= 50):
+                # newly evaluate bout frequencies
+                for i in range(self.n_networks):
+                    t = self.temperature(net_pos[i][steps[i] - history:steps[i], 0],
+                                         net_pos[i][steps[i] - history:steps[i], 1])
+                    bf_eval_model_in[i, 0, :, 0] = t
+                bf_eval_model_in -= self.temp_mean  # these operations are ok since we only care about the
+                bf_eval_model_in /= self.temp_std  # temperature input part - rest can be arbitrary values
+                branch_out = self.model.branch_output(self.model_branch, bf_eval_model_in, self.remove)
+                bfreqs = np.sum(branch_out * self.weight_mat, 1)
+                # apply non-linearity
+                bfreqs = 1 / (1 + np.exp(-bfreqs))  # [0, 1]
+                bfreqs = (2 - 0.5) * bfreqs + 0.5  # [0.5, 2]
+                last_bf_eval = steps  # update indicator
+            # determine which networks should move in this step - one decider draw for all
+            d = self._uni_cash.next_rand()
+            non_movers = np.nonzero(d > bfreqs)[0]
+            movers = np.nonzero(d <= bfreqs)[0]
+            for ix in non_movers:
+                s = steps[ix]
+                net_pos[ix][s, :] = net_pos[ix][s - 1, :]
+                steps[ix] = s+1
+            if movers.size == 0:
+                continue
+            # for each mover compute model prediction
+            for n, ix in enumerate(movers):
+                s = steps[ix]
+                t = self.temperature(net_pos[ix][s - history:s, 0], net_pos[ix][s - history:s, 1])
+                bf_eval_model_in[n, 0, :, 0] = (t - self.temp_mean) / self.temp_std
+                spd = np.sqrt(np.sum(np.diff(net_pos[ix][s - history - 1:s, 0:2], axis=0) ** 2, 1))
+                bf_eval_model_in[n, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
+                dang = np.diff(net_pos[ix][s - history - 1:s, 2], axis=0)
+                bf_eval_model_in[n, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
+            model_out = self.model.predict(bf_eval_model_in[:movers.size, :, :, :], 1.0, self.remove)
+            # for each mover turn model prediction into behavior and execute
+            for n, ix in enumerate(movers):
+                s = steps[ix]
+                proj_diff = np.abs(model_out[n, :] - (self.t_preferred - self.temp_mean) / self.temp_std)
+                behav_ranks = np.argsort(proj_diff)
+                bt = self.select_behavior(behav_ranks)
+                if bt == "N":
+                    net_pos[ix][s, :] = net_pos[ix][s - 1, :]
+                    steps[ix] = s+1
+                    continue
+                traj = self.get_bout_trajectory(net_pos[ix][s - 1, :], bt)
+                if s + self.blen <= nsteps + burn_period:
+                    net_pos[ix][s:s+self.blen, :] = traj
+                else:
+                    net_pos[ix][s:, :] = traj[:net_pos[ix][s:, :].shape[0], :]
+                steps[ix] = s + self.blen
+        return [pos[burn_period:steps[i], :] for i, pos in enumerate(net_pos)]
+
+    def score_networks(self, nsteps):
+        """
+        For each network runs simulation and rates the error as the average temperature distance
+        from the desired temperature weighted by the inverse of the radius
+        :param nsteps: The number of simulation steps to (approximately) perform for each network
+        :return: Average deviation from desired temperature for each network
+        """
+        net_pos = self.run_simulation(nsteps)
+        error_scores = np.full(self.n_networks, np.nan)
+        for i, pos in enumerate(net_pos):
+            temperatures = self.temperature(pos[:, 0], pos[:, 1])
+            weights = 1 / np.sqrt(np.sum(pos[:, :2]**2, 1))
+            sum_of_weights = np.nansum(weights)
+            weighted_sum = np.nansum(np.abs(temperatures - self.t_preferred) * weights)
+            assert not np.isnan(weighted_sum)
+            assert not np.isnan(sum_of_weights)
+            error_scores[i] = weighted_sum / sum_of_weights
+        return error_scores
+
+    def next_generation(self, sel_index: np.ndarray, mut_std=0.1):
+        """
+        Advances the network generation using the networks identified by sel_index as parents and updates weights
+        :param sel_index: The networks to be used as parents of next generation
+        :param mut_std: The standard deviation of mutation noise (if <=0 no mutation is performed)
+        :return: The new weights for convenience
+        """
+        if sel_index.size != (self.n_sel_best+self.n_sel_random):
+            raise ValueError("The number of selected indices has to be {0}".format(self.n_sel_random+self.n_sel_best))
+        new_weight_mat = np.full((self.n_networks, self.n_weights), np.nan)
+        counter = 0
+        for i1 in sel_index:
+            for i2 in sel_index:
+                for ic in range(self.n_progeny):
+                    if i1 != i2:
+                        # randomly mix parents weights - CROSSOVER
+                        selector = np.random.rand(self.n_weights)
+                        new_weight_mat[counter, selector < 0.5] = self.weight_mat[i1, selector < 0.5]
+                        new_weight_mat[counter, selector >= 0.5] = self.weight_mat[i2, selector >= 0.5]
+                    else:
+                        new_weight_mat[counter, :] = self.weight_mat[i1, :]
+                    # MUTATE
+                    if mut_std > 0:
+                        new_weight_mat[counter, :] += np.random.randn(self.n_weights) * mut_std
+                    counter += 1
+        assert not np.any(np.isnan(new_weight_mat))
+        self.weight_mat = new_weight_mat
+        self.generation += 1
+        return self.weight_mat
+
+    def evolve(self, n_eval_steps, mut_std=0.1):
+        """
+        Performs one full evolutionary step - scoring all current network and creating the next generation
+        :param n_eval_steps: The number of steps to use for network scoring simulation
+        :param mut_std: The standard deviation of mutation noise (if <=0 no mutation is performed)
+        :return:
+            [0]: The current errors
+            [1]: The updated weights
+        """
+        errors = self.score_networks(n_eval_steps)
+        ranks = np.argsort(errors)
+        top = ranks[:self.n_sel_best]
+        other = np.random.choice(ranks[self.n_sel_best:], self.n_sel_random, replace=False)
+        return errors, self.next_generation(np.r_[top, other], mut_std)
+
+    @property
+    def n_networks(self):
+        """
+        The total number of networks in each generation
+        """
+        return (self.n_sel_best+self.n_sel_random)**2 * self.n_progeny
+
+    @property
+    def n_weights(self):
+        """
+        The number of weights in each network
+        """
+        return self.model.n_units[0]
