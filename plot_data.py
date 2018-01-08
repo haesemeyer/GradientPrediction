@@ -378,6 +378,7 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
                 # form a weighted average, considering points of larger radius less since just by
                 # chance they will be visited more often
                 weights = 1 / np.sqrt(np.sum(all_pos[:, :2]**2, 1))
+                weights[np.isinf(weights)] = 0  # occurs when 0,0 was picked as starting point only
                 sum_of_weights = np.nansum(weights)
                 weighted_sum = np.nansum(np.sqrt((temp_pos - TPREFERRED)**2) * weights)
                 return weighted_sum / sum_of_weights

@@ -1790,6 +1790,7 @@ class BoutFrequencyEvolver(CircleGradSimulation):
         for i, pos in enumerate(net_pos):
             temperatures = self.temperature(pos[:, 0], pos[:, 1])
             weights = 1 / np.sqrt(np.sum(pos[:, :2]**2, 1))
+            weights[np.isinf(weights)] = 0  # this only occurs when the "fish" is exactly at 0,0 at start, so remove
             sum_of_weights = np.nansum(weights)
             weighted_sum = np.nansum(np.abs(temperatures - self.t_preferred) * weights)
             assert not np.isnan(weighted_sum)
