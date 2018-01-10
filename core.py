@@ -1706,7 +1706,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         def kernel(t):
             indices = np.arange(n_samples)[btype_trace == t]
             ixm = indexing_matrix(indices, HIST_SECONDS*FRAME_RATE, FRAME_RATE, int(n_samples))[0]
-            return np.mean(stim[ixm], 0)
+            return np.mean(stim[ixm]-np.mean(stim), 0)
         stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
         btype_trace = self.compute_openloop_behavior(stim)[0]
         return kernel(0), kernel(1), kernel(2), kernel(3)
