@@ -1316,6 +1316,19 @@ class ModelSimulation(TemperatureArena):
         self.maxstart = 10
         # optionally holds a list of vectors to suppress activation in units that should be "ablated"
         self.remove = None
+        # optionally weights that will transform the output of the temperature branch of the model into a bout frequency
+        self.bf_weights = None
+
+    def get_bout_probability(self, model_in):
+        if self.bf_weights is None:
+            return self.p_move
+        temp_out = self.model.branch_output('t', model_in, self.remove).ravel()
+        activation = np.sum(temp_out * self.bf_weights)
+        # apply nonlinearity
+        bfreq = 1 / (1 + np.exp(-activation))  # [0, 1]
+        bfreq = (2 - 0.5) * bfreq + 0.5  # [0.5, 2]
+        # return corresponding probability
+        return bfreq / FRAME_RATE
 
     def get_start_pos(self):
         x = np.inf
@@ -1370,8 +1383,15 @@ class ModelSimulation(TemperatureArena):
         step = start
         model_in = np.zeros((1, 3, history, 1))
         # overall bout frequency at ~1 Hz
+        last_p_move_evaluation = -100  # tracks the frame when we last updated our movement evaluation
         p_eval = self.p_move
         while step < nsteps + burn_period:
+            # update our movement probability if necessary
+            if step - last_p_move_evaluation >= 20:
+                model_in[0, 0, :, 0] = (self.temperature(pos[step - history:step, 0], pos[step - history:step, 1])
+                                        - self.temp_mean) / self.temp_std
+                p_eval = self.get_bout_probability(model_in)
+                last_p_move_evaluation = step
             if self._uni_cash.next_rand() > p_eval:
                 pos[step, :] = pos[step-1, :]
                 step += 1
@@ -1577,8 +1597,21 @@ class WhiteNoiseSimulation(TemperatureArena):
         self.btypes = ["N", "S", "L", "R"]
         # optional removal of network units
         self.remove = None
+        # optionally weights that will transform the output of the temperature branch of the model into a bout frequency
+        self.bf_weights = None
 
     # Private API
+    def get_bout_probability(self, model_in):
+        if self.bf_weights is None:
+            return self.p_move
+        temp_out = self.model.branch_output('t', model_in, self.remove).ravel()
+        activation = np.sum(temp_out * self.bf_weights)
+        # apply nonlinearity
+        bfreq = 1 / (1 + np.exp(-activation))  # [0, 1]
+        bfreq = (2 - 0.5) * bfreq + 0.5  # [0.5, 2]
+        # return corresponding probability
+        return bfreq / FRAME_RATE
+
     def _get_bout(self, bout_type: str):
         """
         For a given bout-type computes and returns the displacement and delta-heading trace
@@ -1629,7 +1662,9 @@ class WhiteNoiseSimulation(TemperatureArena):
         angle_trace = np.zeros_like(stimulus)
         while step < stimulus.size:
             # first invoke the bout clock and pass if we shouldn't select a behavior
-            if self._uni_cash.next_rand() > self.p_move:
+            model_in[0, 0, :, 0] = stimulus[step - history:step]
+            p_eval = self.get_bout_probability(model_in)
+            if self._uni_cash.next_rand() > p_eval:
                 step += 1
                 continue
             model_in[0, 0, :, 0] = stimulus[step - history:step]
