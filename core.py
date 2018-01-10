@@ -1446,10 +1446,18 @@ class ModelSimulation(TemperatureArena):
         pos = np.full((nsteps + burn_period, 3), np.nan)
         pos[:start + 1, :] = self.get_start_pos()[None, :]
         step = start
+        model_in = np.zeros((1, 3, history, 1))
+        last_p_move_evaluation = -100  # tracks the frame when we last updated our movement evaluation
         # overall bout frequency at ~1 Hz
         p_eval = self.p_move
         t_out = np.zeros(4)
         while step < nsteps + burn_period:
+            # update our movement probability if necessary
+            if step - last_p_move_evaluation >= 20:
+                model_in[0, 0, :, 0] = (self.temperature(pos[step - history:step, 0], pos[step - history:step, 1])
+                                        - self.temp_mean) / self.temp_std
+                p_eval = self.get_bout_probability(model_in)
+                last_p_move_evaluation = step
             if self._uni_cash.next_rand() > p_eval:
                 pos[step, :] = pos[step - 1, :]
                 step += 1
