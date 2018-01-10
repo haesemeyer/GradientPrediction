@@ -1601,7 +1601,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         self.bf_weights = None
 
     # Private API
-    def get_bout_probability(self, model_in):
+    def _get_bout_probability(self, model_in):
         if self.bf_weights is None:
             return self.p_move
         temp_out = self.model.branch_output('t', model_in, self.remove).ravel()
@@ -1663,7 +1663,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         while step < stimulus.size:
             # first invoke the bout clock and pass if we shouldn't select a behavior
             model_in[0, 0, :, 0] = stimulus[step - history:step]
-            p_eval = self.get_bout_probability(model_in)
+            p_eval = self._get_bout_probability(model_in)
             if self._uni_cash.next_rand() > p_eval:
                 step += 1
                 continue
