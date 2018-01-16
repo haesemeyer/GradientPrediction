@@ -1900,3 +1900,89 @@ class BoutFrequencyEvolver(CircleGradSimulation):
         The number of weights in each network
         """
         return self.model.n_units[0]
+
+
+class PersistentStore:
+    """
+    Base class for persistent storage of analysis results with an HDF5 backend
+    """
+    def __init__(self, db_file_name, read_only=False):
+        """
+        Create a new store with the indicated file as backend
+        :param db_file_name: The path and name of backend file. File will be created if it doesn't exist
+        :param read_only: No changes allowed to backend and will fail if file does not exist
+        """
+        self._db_filename = db_file_name
+        self._read_only = read_only
+        self._db_file = None  # type: h5py.File
+
+    def __enter__(self):
+        """
+        Entry point for context manager - open backend
+        """
+        if self._read_only:
+            self._db_file = h5py.File(self._db_filename, "r")
+        else:
+            self._db_file = h5py.File(self._db_filename, "a")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """
+        Exit context manager, close file backend
+        """
+        if self._db_file is not None:
+            self._db_file.close()
+        self._db_file = None
+
+    def _check_open(self):
+        """
+        Checks whether the database file has been opened raises NotInitialized otherwise
+        """
+        if self._db_file is None:
+            raise NotInitialized("Backend is not open")
+
+    @staticmethod
+    def _identifier(*args):
+        return '/'.join([str(a) for a in args])
+
+    def _get_data(self, *args):
+        """
+        Concatenates arguments into hdf5 path and returns data if it exists
+        :param args: Ordered series of group/data keys
+        :return: The data identified by the arguments or None if it does not exist
+        """
+        self._check_open()
+        identifier = self._identifier(*args)
+        if identifier in self._db_file:
+            return np.array(self._db_file[identifier])
+        else:
+            return None
+
+    def _set_data(self, data: np.ndarray, *args):
+        """
+        Sets/updates data at hdf5 path indicated by *args with given data
+        :param data: The data to store
+        :param args: Ordered series of group/data keys
+        """
+        self._check_open()
+        if self._read_only:
+            raise IOError("Setting not allowed on readonly object")
+        identifier = self._identifier(*args)
+        if identifier in self._db_file:
+            del self._db_file[identifier]
+        try:
+            self._db_file.create_dataset(identifier, data=data, compression="gzip", compression_opts=6)
+        except TypeError:
+            # data can't be compressed - the case for pickle strings wrapped as np.void
+            self._db_file.create_dataset(identifier, data=data)
+
+    def _clear_data(self, *args):
+        """
+        Clears data at hdf5 path indicated by *args. Raises KeyError if data does not exist
+        :param args: Ordered series of group/data keys
+        """
+        identifier = self._identifier(*args)
+        if identifier in self._db_file:
+            del self._db_file[identifier]
+        else:
+            raise KeyError("Could not find data identifier in file")
