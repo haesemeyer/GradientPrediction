@@ -15,7 +15,7 @@ import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
 from gradientSimulation import run_simulation, CircleGradSimulation, LinearGradientSimulation
-from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation
+from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation, PersistentStore
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame
@@ -31,6 +31,34 @@ paths_256 = [f+'/' for f in os.listdir(base_path) if "_3m256_" in f]
 n_steps = 2000000
 TPREFERRED = 26
 
+# TODO: Create classes to persist both simulation results (positions, debug info) and cell responses / clustering
+# to disk by providing a convenient interface to hdf5 backend files
+# For simulation results this should be organized as a grouped file with the following example hierarchy:
+# [Model path w.o. basepath]
+# ------- [naive / trained / ideal / bfevolve]
+# --------------- [pos / debug]
+# ----------------> DATA
+# Whenever a given key is found, the information is returned. If it isn't in the file yet, the corresponding simulation
+# is (re)run and all requested information is stored (if only pos available but debug requested, sim is rerun and *both*
+# pieces are stored, updating the pos record
+#
+# For cell responses this will be similarly organized but taking the used stimulus into account:
+# [Model path w.o. basepath]
+# ------- [blake2b hash of stimulus, digest size 8 bytes]
+# --------------- [responses / unitIds]
+# ----------------> DATA
+# NOTE: responses should never be stored without corresponding unitIds and the class needs to keep track which unit ids
+# are already in use, to assign a new unique id
+# The same class / file should probably also interface clustering outcomes within the stimulus hierarchy
+
+
+class SimulationStore(PersistentStore):
+    """
+    Hdf5 backed store of simulation data
+    """
+    def __init__(self, db_file_name, read_only=False):
+        super().__init__(db_file_name, read_only)
+
 
 def loss_file(path):
     return base_path + path + "losses.hdf5"
@@ -41,35 +69,35 @@ def mpath(path):
 
 
 def train_loss(fname):
-    dfile = h5py.File(fname, "r")
-    train_losses = np.array(dfile["train_losses"])
-    rank_errors = np.array(dfile["train_rank_errors"])
-    timepoints = np.array(dfile["train_eval"])
+    lossfile = h5py.File(fname, "r")
+    train_losses = np.array(lossfile["train_losses"])
+    rank_errors = np.array(lossfile["train_rank_errors"])
+    timepoints = np.array(lossfile["train_eval"])
     dfile.close()
     return timepoints, train_losses, rank_errors
 
 
 def test_loss(fname):
-    dfile = h5py.File(fname, "r")
-    test_losses = np.array(dfile["test_losses"])
-    rank_errors = np.array(dfile["test_rank_errors"])
-    timepoints = np.arange(test_losses.size) * 1000
+    lossfile = h5py.File(fname, "r")
+    test_losses = np.array(lossfile["test_losses"])
+    rank_errors = np.array(lossfile["test_rank_errors"])
+    timepoints = np.array(lossfile["test_eval"])
     return timepoints, test_losses, rank_errors
 
 
 def plot_squared_losses():
     # assume timepoints same for all
     test_time = test_loss(loss_file(paths_512[0]))[0]
-    test_256 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_256]), 0)
-    test_512 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_512]), 0)
-    test_1024 = np.mean(np.vstack([test_loss(loss_file(p))[1] for p in paths_1024]), 0)
+    test_256 = np.mean(np.vstack([test_loss(loss_file(lp))[1] for lp in paths_256]), 0)
+    test_512 = np.mean(np.vstack([test_loss(loss_file(lp))[1] for lp in paths_512]), 0)
+    test_1024 = np.mean(np.vstack([test_loss(loss_file(lp))[1] for lp in paths_1024]), 0)
     fig, ax = pl.subplots()
     ax.plot(test_time, np.log10(gaussian_filter1d(test_256, 2)), "C0.", label="256 HU")
     ax.plot(test_time, np.log10(gaussian_filter1d(test_512, 2)), "C1.", label="512 HU")
     ax.plot(test_time, np.log10(gaussian_filter1d(test_1024, 2)), "C2.", label="1024 HU")
     epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
     for e in epoch_times:
-        ax.plot([e, e], [-1.5, -0.5], 'k--', lw=0.5)
+        ax.plot([e, e], [-1.2, -0.5], 'k--', lw=0.5)
     ax.set_ylabel("log(Squared test error)")
     ax.set_xlabel("Training step")
     ax.legend()
@@ -79,9 +107,9 @@ def plot_squared_losses():
 def plot_rank_losses():
     # assume timepoints same for all
     test_time = test_loss(loss_file(paths_512[0]))[0]
-    test_256 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_256]), 0)
-    test_512 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_512]), 0)
-    test_1024 = np.mean(np.vstack([test_loss(loss_file(p))[2] for p in paths_1024]), 0)
+    test_256 = np.mean(np.vstack([test_loss(loss_file(lp))[2] for lp in paths_256]), 0)
+    test_512 = np.mean(np.vstack([test_loss(loss_file(lp))[2] for lp in paths_512]), 0)
+    test_1024 = np.mean(np.vstack([test_loss(loss_file(lp))[2] for lp in paths_1024]), 0)
     fig, ax = pl.subplots()
     ax.plot(test_time, gaussian_filter1d(test_256, 2), "C0.", label="256 HU")
     ax.plot(test_time, gaussian_filter1d(test_512, 2), "C1.", label="512 HU")
@@ -109,7 +137,7 @@ def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
     :return:
         [0]: The occupancy bins
         [1]: The occupancy of the naive model
-        [2]: The occupancey of the trained model
+        [2]: The occupancy of the trained model
         [3]: The occupancy of the ideal choice model if run_ideal=True, None otherwise
         [4]: The occupancy of a unit dropped model if drop_list is provided, None otherwise
     """
@@ -125,12 +153,16 @@ def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
         if drop_list is not None:
             sim_drop = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
             sim_drop.remove = drop_list
+        else:
+            sim_drop = None
     else:
         sim_naive = CircleGradSimulation(gpn_naive, train_data, 100, 22, 37, TPREFERRED)
         sim_trained = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
         if drop_list is not None:
             sim_drop = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
             sim_drop.remove = drop_list
+        else:
+            sim_drop = None
     b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
     b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
     h_ideal = None
@@ -148,27 +180,31 @@ def plot_sim(train_data_stds, sim_type):
     t_512 = []
     t_1024 = []
     bins = None
-    for p in paths_256:
-        bins, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
-        all_n.append(n)
-        t_256.append(t)
-    t_256 = np.mean(np.vstack(t_256), 0)
-    for p in paths_512:
-        bins, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
-        all_n.append(n)
-        t_512.append(t)
-    t_512 = np.mean(np.vstack(t_512), 0)
-    for p in paths_1024:
-        _, n, t = do_simulation(mpath(p), train_data_stds, sim_type, False)[:3]
-        all_n.append(n)
-        t_1024.append(t)
-    t_1024 = np.mean(np.vstack(t_1024), 0)
-    all_n = np.mean(np.vstack(all_n), 0)
+    for p256 in paths_256:
+        bins, naive, trained = do_simulation(mpath(p256), train_data_stds, sim_type, False)[:3]
+        all_n.append(naive)
+        t_256.append(trained)
+    t_256 = np.vstack(t_256)
+    for p512 in paths_512:
+        _, naive, trained = do_simulation(mpath(p512), train_data_stds, sim_type, False)[:3]
+        all_n.append(naive)
+        t_512.append(trained)
+    t_512 = np.vstack(t_512)
+    for p1024 in paths_1024:
+        _, naive, trained = do_simulation(mpath(p1024), train_data_stds, sim_type, False)[:3]
+        all_n.append(naive)
+        t_1024.append(trained)
+    t_1024 = np.vstack(t_1024)
+    all_n = np.vstack(all_n)
     fig, ax = pl.subplots()
-    ax.plot(bins, t_256, lw=2, label="256 HU")
-    ax.plot(bins, t_512, lw=2, label="512 HU")
-    ax.plot(bins, t_1024, lw=2, label="1024 HU")
-    ax.plot(bins, all_n, "k", lw=2, label="Naive")
+    sns.tsplot(t_256, bins, n_boot=1000, ax=ax, color="C0")
+    ax.plot(bins, np.mean(t_256, 0), lw=2, label="256 HU", c="C0")
+    sns.tsplot(t_512, bins, n_boot=1000, ax=ax, color="C1")
+    ax.plot(bins, np.mean(t_512, 0), lw=2, label="512 HU", c="C1")
+    sns.tsplot(t_1024, bins, n_boot=1000, ax=ax, color="C2")
+    ax.plot(bins, np.mean(t_1024, 0), lw=2, label="1024 HU", c="C2")
+    sns.tsplot(all_n, bins, n_boot=1000, ax=ax, color="k")
+    ax.plot(bins, np.mean(all_n, 0), "k", lw=2, label="Naive")
     ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'C4--')
     ax.set_ylim(0)
     ax.legend()
@@ -188,20 +224,27 @@ def get_cell_responses(model_dir, temp, network_id):
         [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
     """
     mdata = ModelData(model_dir)
-    gpn = GpNetworkModel()
-    gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+    gpn_trained = GpNetworkModel()
+    gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     # prepend lead-in to stimulus
-    lead_in = np.full(gpn.input_dims[2] - 1, np.mean(temp[:10]))
+    lead_in = np.full(gpn_trained.input_dims[2] - 1, np.mean(temp[:10]))
     temp = np.r_[lead_in, temp]
-    activities = gpn.unit_stimulus_responses(temp, None, None, std)['t']
+    act_dict = gpn_trained.unit_stimulus_responses(temp, None, None, std)
+    if 't' in act_dict:
+        activities = act_dict['t']
+    else:
+        activities = act_dict['m']
     activities = np.hstack(activities)
     # build id matrix
     id_mat = np.zeros((3, activities.shape[1]), dtype=np.int32)
     id_mat[0, :] = network_id
-    hidden_sizes = [gpn.n_units[0]] * gpn.n_layers_branch
+    if 't' in act_dict:
+        hidden_sizes = [gpn_trained.n_units[0]] * gpn_trained.n_layers_branch
+    else:
+        hidden_sizes = [gpn_trained.n_units[1]] * gpn_trained.n_layers_mixed
     start = 0
-    for i, hs in enumerate(hidden_sizes):
-        id_mat[1, start:start + hs] = i
+    for layer, hs in enumerate(hidden_sizes):
+        id_mat[1, start:start + hs] = layer
         id_mat[2, start:start + hs] = np.arange(hs, dtype=np.int32)
         start += hs
     return activities, id_mat
@@ -230,33 +273,6 @@ def create_det_drop_list(network_id, cluster_ids, unit_ids, clust_to_drop, shuff
             np.random.shuffle(drop)
         det_drop.append(drop)
     return {'t': det_drop}
-
-
-def plot_512sim_w_drop(train_data, sim_type, clust_do_drop, shuffle):
-    all_n = []
-    t_512 = []
-    tdrop_512 = []
-    for i, p in enumerate(paths_512):
-        bins, n, t, _, drop = do_simulation(mpath(p), train_data, sim_type, False,
-                                            create_det_drop_list(i, clust_ids, all_ids, clust_do_drop, shuffle))
-        all_n.append(n)
-        t_512.append(t)
-        tdrop_512.append(drop)
-    t_512 = np.vstack(t_512)
-    all_n = np.mean(np.vstack(all_n), 0)
-    tdrop_512 = np.vstack(tdrop_512)
-    fig, ax = pl.subplots()
-    sns.tsplot(t_512, bins, err_style="unit_traces", color="C0", ax=ax)
-    ax.plot(bins, np.mean(t_512, 0), "C0", lw=2, label="512 dropped")
-    sns.tsplot(tdrop_512, bins, err_style="unit_traces", color="C1", ax=ax)
-    ax.plot(bins, np.mean(tdrop_512, 0), "C1", lw=2, label="512 dropped")
-    ax.plot(bins, all_n, "k", lw=2, label="Naive")
-    ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'C4--')
-    ax.set_ylim(0)
-    ax.legend()
-    ax.set_ylabel("Proportion")
-    ax.set_xlabel("Temperature")
-    sns.despine(fig, ax)
 
 
 def plot_sim_debug(path, train_data, sim_type, drop_list=None):
@@ -559,6 +575,34 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
 # def plot_fish_nonfish_analysis
 
 
+def compute_gradient_bout_frequency(model_path, drop_list=None):
+    def bout_freq(sim: CircleGradSimulation):
+        pos = sim.run_simulation(n_steps)
+        r = np.sqrt(np.sum(pos[:, :2]**2, 1))  # radial position
+        spd = np.r_[0, np.sqrt(np.sum(np.diff(pos[:, :2], axis=0) ** 2, 1))]  # speed
+        bs = np.r_[0, np.diff(spd) > 0.00098]  # bout starts
+        bins = np.linspace(0, 100, 6)
+        bcenters = bins[:-1] + np.diff(bins)/2
+        cnt_r = np.histogram(r, bins)[0]
+        cnt_r_bs = np.histogram(r[bs > 0.1], bins)[0]
+        bfreq = cnt_r_bs / cnt_r * FRAME_RATE
+        return bfreq, bcenters
+    model_data = ModelData(model_path)
+    network = GpNetworkModel()
+    network.load(model_data.ModelDefinition, model_data.LastCheckpoint)
+    ev_path = model_path + '/evolve/generation_weights.npy'
+    weights = np.load(ev_path)
+    w = np.mean(weights[-1, :, :], 0)
+    sim_fixed = CircleGradSimulation(network, std, 100, 22, 37, TPREFERRED)
+    sim_fixed.remove = drop_list
+    bf_fixed, bc = bout_freq(sim_fixed)
+    sim_var = CircleGradSimulation(network, std, 100, 22, 37, TPREFERRED)
+    sim_var.remove = drop_list
+    sim_var.bf_weights = w
+    bf_var, bc = bout_freq(sim_var)
+    return bc, bf_fixed, bf_var
+
+
 if __name__ == "__main__":
     # plot training progress
     plot_squared_losses()
@@ -641,10 +685,10 @@ if __name__ == "__main__":
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]
     for p in paths_512:
-        mdata = ModelData(mpath(p))
-        gpn = GpNetworkModel()
-        gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-        wna = WhiteNoiseSimulation(std, gpn)
+        mdata_wn = ModelData(mpath(p))
+        gpn_wn = GpNetworkModel()
+        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
+        wna = WhiteNoiseSimulation(std, gpn_wn)
         kernels = wna.compute_behavior_kernels(10000000)
         for i, n in enumerate(k_names):
             if n in behav_kernels:
