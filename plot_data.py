@@ -19,6 +19,7 @@ from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolv
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame
+import pickle
 
 
 # file definitions
@@ -30,6 +31,8 @@ paths_256 = [f+'/' for f in os.listdir(base_path) if "_3m256_" in f]
 # simulation globals
 n_steps = 2000000
 TPREFERRED = 26
+circle_sim_params = {"radius": 100, "t_min": 22, "t_max": 37, "t_preferred": TPREFERRED}
+lin_sim_params = {"xmax": 100, "ymax": 100, "t_min": 22, "t_max": 37, "t_preferred": TPREFERRED}
 
 # TODO: Create classes to persist both simulation results (positions, debug info) and cell responses / clustering
 # to disk by providing a convenient interface to hdf5 backend files
@@ -99,13 +102,14 @@ class SimulationStore(ModelStore):
             raise ValueError("network_state {0} is not valid has to be one of {1}".format(network_state, val_states))
 
     @staticmethod
-    def _run_sim(model_path: str, sim_type: str, network_state: str, debug: bool):
+    def _run_sim(model_path: str, sim_type: str, network_state: str, debug: bool, drop_list=None):
         """
         Run simulation to obtain position and possibly debug information
         :param model_path: Full path to the network model definitions
         :param sim_type: Indicator of simulation type
         :param network_state: Indicator of network state
         :param debug: If true return debug information as well
+        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
         :return:
             [0]: n_steps x 3 matrix of position information at each step
             [1]: Debug dict if debug is true or None otherwise
@@ -121,9 +125,10 @@ class SimulationStore(ModelStore):
         gpn = GpNetworkModel()
         gpn.load(mdata.ModelDefinition, chk)
         if sim_type == "r":
-            sim = CircleGradSimulation(gpn, std, 100, 22, 37, TPREFERRED)
+            sim = CircleGradSimulation(gpn, std, **circle_sim_params)
         else:
-            sim = LinearGradientSimulation(gpn, std, 100, 100, 22, 37, TPREFERRED)
+            sim = LinearGradientSimulation(gpn, std, **lin_sim_params)
+        sim.remove = drop_list
         if network_state == "bfevolve":
             ev_path = model_path + '/evolve/generation_weights.npy'
             weights = np.load(ev_path)
@@ -133,15 +138,19 @@ class SimulationStore(ModelStore):
         else:
             return sim.run_simulation(n_steps, debug)
 
-    def get_sim_pos(self, model_path: str, sim_type: str, network_state: str) -> np.ndarray:
+    def get_sim_pos(self, model_path: str, sim_type: str, network_state: str, drop_list=None) -> np.ndarray:
         """
         Retrieves simulation positions from the storage or runs simulation
         :param model_path: The full path to the network model
         :param sim_type: The simulation type, r = radial, l = linear
         :param network_state: The state of the netowrk: naive, trained, ideal or bfevolve
+        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
         :return: The simulation positions
         """
         self._val_ids(sim_type, network_state)
+        if drop_list is not None:
+            # currently we do not store simulations that drop units
+            return self._run_sim(model_path, sim_type, network_state, False, drop_list)
         mdir = self.model_dir_name(model_path)
         pos = self._get_data(mdir, sim_type, network_state, "pos")
         if pos is not None:
@@ -151,25 +160,30 @@ class SimulationStore(ModelStore):
             self._set_data(pos, mdir, sim_type, network_state, "pos")
             return pos
 
-    def get_sim_debug(self, model_path: str, sim_type: str, network_state: str) -> dict:
+    def get_sim_debug(self, model_path: str, sim_type: str, network_state: str, drop_list=None) -> dict:
         """
         Retrieves simulation debug dict from the storage or runs simulation
         :param model_path: The full path to the network model
         :param sim_type: The simulation type, r = radial, l = linear
         :param network_state: The state of the netowrk: naive, trained, ideal or bfevolve
+        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
         :return: The simulation debug dict
         """
         self._val_ids(sim_type, network_state)
         if network_state == "ideal":
             raise ValueError("debug information is currently not returned for ideal simulation")
+        if drop_list is not None:
+            # currently we do not store simulations that drop units
+            return self._run_sim(model_path, sim_type, network_state, True, drop_list)
         mdir = self.model_dir_name(model_path)
-        deb_dict = self._get_data(mdir, sim_type, network_state, "debug")
-        if deb_dict is not None:
+        db_pickle = self._get_data(mdir, sim_type, network_state, "debug")
+        if db_pickle is not None:
+            deb_dict = pickle.loads(db_pickle)
             return deb_dict
         else:
             pos, dbdict = self._run_sim(model_path, sim_type, network_state, True)
             self._set_data(pos, mdir, sim_type, network_state, "pos")
-            self._set_data(dbdict, mdir, sim_type, network_state, "debug")
+            self._set_data(np.void(pickle.dumps(dbdict)), mdir, sim_type, network_state, "debug")
             return dbdict
 
 
