@@ -132,7 +132,8 @@ class SimulationStore(ModelStore):
         if network_state == "bfevolve":
             ev_path = model_path + '/evolve/generation_weights.npy'
             weights = np.load(ev_path)
-            sim.bf_weights = weights
+            w = np.mean(weights[-1, :, :], 0)
+            sim.bf_weights = w
         if network_state == "ideal":
             return sim.run_ideal(n_steps)
         else:
