@@ -20,6 +20,7 @@ from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame
 import pickle
+from hashlib import md5
 
 
 # file definitions
@@ -33,27 +34,6 @@ n_steps = 2000000
 TPREFERRED = 26
 circle_sim_params = {"radius": 100, "t_min": 22, "t_max": 37, "t_preferred": TPREFERRED}
 lin_sim_params = {"xmax": 100, "ymax": 100, "t_min": 22, "t_max": 37, "t_preferred": TPREFERRED}
-
-# TODO: Create classes to persist both simulation results (positions, debug info) and cell responses / clustering
-# to disk by providing a convenient interface to hdf5 backend files
-# For simulation results this should be organized as a grouped file with the following example hierarchy:
-# [Model path w.o. basepath]
-# ---- [r / l]
-# ------- [naive / trained / ideal / bfevolve]
-# --------------- [pos / debug]
-# ----------------> DATA
-# Whenever a given key is found, the information is returned. If it isn't in the file yet, the corresponding simulation
-# is (re)run and all requested information is stored (if only pos available but debug requested, sim is rerun and *both*
-# pieces are stored, updating the pos record
-#
-# For cell responses this will be similarly organized but taking the used stimulus into account:
-# [Model path w.o. basepath]
-# ------- [blake2b hash of stimulus, digest size 8 bytes]
-# --------------- [responses / unitIds]
-# ----------------> DATA
-# NOTE: responses should never be stored without corresponding unitIds and the class needs to keep track which unit ids
-# are already in use, to assign a new unique id
-# The same class / file should probably also interface clustering outcomes within the stimulus hierarchy
 
 
 class ModelStore(PersistentStore):
@@ -189,6 +169,75 @@ class SimulationStore(ModelStore):
             self._set_data(pos, mdir, sim_type, network_state, "pos")
             self._set_data(np.void(pickle.dumps(dbdict)), mdir, sim_type, network_state, "debug")
             return pos, dbdict
+
+
+class ActivityStore(ModelStore):
+    """
+    Hdf5 backed store of network cell activity data
+    """
+    def __init__(self, db_file_name, read_only=False):
+        super().__init__(db_file_name, read_only)
+
+    @staticmethod
+    def _compute_cell_responses(model_dir, temp, network_id):
+        """
+        Loads a model and computes the temperature response of all neurons returning response matrix
+        :param model_dir: The directory of the network model
+        :param temp: The temperature input to test on the network
+        :param network_id: Numerical id of the network to later relate units back to a network
+        :return:
+            [0]: n-timepoints x m-neurons matrix of responses
+            [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
+        """
+        global std
+        mdata = ModelData(model_dir)
+        gpn_trained = GpNetworkModel()
+        gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+        # prepend lead-in to stimulus
+        lead_in = np.full(gpn_trained.input_dims[2] - 1, np.mean(temp[:10]))
+        temp = np.r_[lead_in, temp]
+        act_dict = gpn_trained.unit_stimulus_responses(temp, None, None, std)
+        if 't' in act_dict:
+            activities = act_dict['t']
+        else:
+            activities = act_dict['m']
+        activities = np.hstack(activities)
+        # build id matrix
+        id_mat = np.zeros((3, activities.shape[1]), dtype=np.int32)
+        id_mat[0, :] = network_id
+        if 't' in act_dict:
+            hidden_sizes = [gpn_trained.n_units[0]] * gpn_trained.n_layers_branch
+        else:
+            hidden_sizes = [gpn_trained.n_units[1]] * gpn_trained.n_layers_mixed
+        start = 0
+        for layer, hs in enumerate(hidden_sizes):
+            id_mat[1, start:start + hs] = layer
+            id_mat[2, start:start + hs] = np.arange(hs, dtype=np.int32)
+            start += hs
+        return activities, id_mat
+
+    def get_cell_responses(self, model_path: str, temperature: np.ndarray, network_id: int):
+        """
+        Obtain cell responses of all units in the given model for the given temperature stimulus
+        :param model_path: The full path to the network model
+        :param temperature: The temperature stimulus to present to the network
+        :param network_id: An assigned numerical id of the network to later relate units back to a network
+        :return:
+            [0]: n-timepoints x m-neurons matrix of responses
+            [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1 and unit index in row 2
+        """
+        stim_hash = md5(temperature).hexdigest()
+        mdir = self.model_dir_name(model_path)
+        activities = self._get_data(mdir, stim_hash, "activities")
+        id_mat = self._get_data(mdir, stim_hash, "id_mat")
+        if activities is not None and id_mat is not None:
+            # re-assign network id
+            id_mat[0, :] = network_id
+            return activities, id_mat
+        activities, id_mat = self._compute_cell_responses(model_path, temperature, network_id)
+        self._set_data(activities, mdir, stim_hash, "activities")
+        self._set_data(id_mat, mdir, stim_hash, "id_mat")
+        return activities, id_mat
 
 
 def loss_file(path):
@@ -371,43 +420,6 @@ def plot_sim(sim_type):
     ax.set_ylabel("Proportion")
     ax.set_xlabel("Temperature")
     sns.despine(fig, ax)
-
-
-def get_cell_responses(model_dir, temp, network_id):
-    """
-    Loads a model and computes the temperature response of all neurons returning response matrix
-    :param model_dir: The directory of the network model
-    :param temp: The temperature input to test on the network
-    :param network_id: Numerical id of the network to later relate units back to a network
-    :return:
-        [0]: n-timepoints x m-neurons matrix of responses
-        [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
-    """
-    mdata = ModelData(model_dir)
-    gpn_trained = GpNetworkModel()
-    gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-    # prepend lead-in to stimulus
-    lead_in = np.full(gpn_trained.input_dims[2] - 1, np.mean(temp[:10]))
-    temp = np.r_[lead_in, temp]
-    act_dict = gpn_trained.unit_stimulus_responses(temp, None, None, std)
-    if 't' in act_dict:
-        activities = act_dict['t']
-    else:
-        activities = act_dict['m']
-    activities = np.hstack(activities)
-    # build id matrix
-    id_mat = np.zeros((3, activities.shape[1]), dtype=np.int32)
-    id_mat[0, :] = network_id
-    if 't' in act_dict:
-        hidden_sizes = [gpn_trained.n_units[0]] * gpn_trained.n_layers_branch
-    else:
-        hidden_sizes = [gpn_trained.n_units[1]] * gpn_trained.n_layers_mixed
-    start = 0
-    for layer, hs in enumerate(hidden_sizes):
-        id_mat[1, start:start + hs] = layer
-        id_mat[2, start:start + hs] = np.arange(hs, dtype=np.int32)
-        start += hs
-    return activities, id_mat
 
 
 def create_det_drop_list(network_id, cluster_ids, unit_ids, clust_to_drop, shuffle=False):
@@ -740,7 +752,8 @@ if __name__ == "__main__":
     all_cells = []
     all_ids = []
     for i, d in enumerate(paths_512):
-        cell_res, ids = get_cell_responses(mpath(d), temperature, i)
+        with ActivityStore("activity_store.hdf5") as act_store:
+            cell_res, ids = act_store.get_cell_responses(mpath(d), temperature, i)
         all_cells.append(cell_res)
         all_ids.append(ids)
     all_cells = np.hstack(all_cells)
