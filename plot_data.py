@@ -14,7 +14,7 @@ from scipy.stats import linregress
 import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
-from gradientSimulation import run_simulation, CircleGradSimulation, LinearGradientSimulation
+from core import CircleGradSimulation, LinearGradientSimulation
 from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation, PersistentStore
 from analyzeTempResponses import trial_average, cluster_responses
 import os
@@ -256,73 +256,102 @@ def plot_rank_losses():
     sns.despine()
 
 
-def do_simulation(path, train_data, sim_type, run_ideal, drop_list=None):
+def bin_simulation(pos, bins: np.ndarray, simdir="r"):
+    """
+    Bin simulation results along the simulation direction, normalizigin occupancy in case of radial simulation
+    :param pos: Position array obtained from running simulation
+    :param bins: Array containing bin edges
+    :param simdir: Determines whether occupancy should be calculated along (r)adius, (x)- or (y)-axis
+    :return: Relative occupancy (corrected if radial)
+    """
+    if simdir not in ["r", "x", "y"]:
+        raise ValueError("simdir has to be one of (r)adius, (x)- or (y)-axis")
+    if simdir == "r":
+        quantpos = np.sqrt(np.sum(pos[:, :2] ** 2, 1))
+    elif simdir == "x":
+        quantpos = pos[:, 0]
+    else:
+        quantpos = pos[:, 1]
+    bin_centers = bins[:-1] + np.diff(bins) / 2
+    h = np.histogram(quantpos, bins)[0].astype(float)
+    # for radial histogram normalize by radius to offset area increase
+    if simdir == "r":
+        h = h / bin_centers
+    h = h / h.sum()
+    return h
+
+
+def temp_convert(distances, sim_type):
+    """
+    Converts center or origin distances into temperature values according to our standard simulation types
+    """
+    if sim_type == "r":
+        return distances / circle_sim_params["radius"] * (circle_sim_params["t_max"] - circle_sim_params["t_min"]) + \
+               circle_sim_params["t_min"]
+    else:
+        return distances / lin_sim_params["radius"] * (lin_sim_params["t_max"] - lin_sim_params["t_min"]) + \
+               lin_sim_params["t_min"]
+
+
+def do_simulation(path, sim_type, run_ideal, drop_list=None):
     """
     Uses a model identified by path to run a naive and a trained and optionally an ideal and unit dropped simulation
     :param path: The model path
-    :param train_data: The train_data or equivalent object to provide temperature scaling information
     :param sim_type: The simulation type to run
     :param run_ideal: If true, an ideal choice simulation will be run as well
     :param drop_list: If not none should be a list that will be fed to det_drop to determine which units are kept (1)
         or dropped (0)
     :return:
-        [0]: The occupancy bins
+        [0]: The occupancy bin centers in degrees C
         [1]: The occupancy of the naive model
         [2]: The occupancy of the trained model
         [3]: The occupancy of the ideal choice model if run_ideal=True, None otherwise
         [4]: The occupancy of a unit dropped model if drop_list is provided, None otherwise
     """
-    mdata = ModelData(path)
-    gpn_naive = GpNetworkModel()
-    gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
-    gpn_trained = GpNetworkModel()
-    gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+    bins = np.linspace(0, circle_sim_params["radius"], 100)
+    # bin-centers in degress
+    bcenters = bins[:-1]+np.diff(bins)/2
+    bcenters = temp_convert(bcenters, sim_type)
     if sim_type == "l":
-        sim_type = "x"
-        sim_naive = LinearGradientSimulation(gpn_naive, train_data, 100, 100, 22, 37, TPREFERRED)
-        sim_trained = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-        if drop_list is not None:
-            sim_drop = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_drop.remove = drop_list
-        else:
-            sim_drop = None
+        simdir = "x"
     else:
-        sim_naive = CircleGradSimulation(gpn_naive, train_data, 100, 22, 37, TPREFERRED)
-        sim_trained = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
-        if drop_list is not None:
-            sim_drop = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
-            sim_drop.remove = drop_list
+        simdir = "r"
+    with SimulationStore("sim_store.hdf5") as sim_store:
+        pos_naive = sim_store.get_sim_pos(path, sim_type, "naive")
+        h_naive = bin_simulation(pos_naive, bins, simdir)
+        pos_trained = sim_store.get_sim_pos(path, sim_type, "trained")
+        h_trained = bin_simulation(pos_trained, bins, simdir)
+        if run_ideal:
+            pos_ideal = sim_store.get_sim_pos(path, sim_type, "ideal")
+            h_ideal = bin_simulation(pos_ideal, bins, simdir)
         else:
-            sim_drop = None
-    b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
-    b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
-    h_ideal = None
-    h_drop = None
-    if run_ideal:
-        b_ideal, h_ideal = run_simulation(sim_trained, n_steps, True, sim_type)[1:]
-    if drop_list is not None:
-        b_drop, h_drop = run_simulation(sim_drop, n_steps, False, sim_type)[1:]
-    return b_naive, h_naive, h_trained, h_ideal, h_drop
+            h_ideal = None
+        if drop_list is not None:
+            pos_drop = sim_store.get_sim_pos(path, sim_type, "trained", drop_list)
+            h_drop = bin_simulation(pos_drop, bins, simdir)
+        else:
+            h_drop = None
+    return bcenters, h_naive, h_trained, h_ideal, h_drop
 
 
-def plot_sim(train_data_stds, sim_type):
+def plot_sim(sim_type):
     all_n = []
     t_256 = []
     t_512 = []
     t_1024 = []
     bins = None
     for p256 in paths_256:
-        bins, naive, trained = do_simulation(mpath(p256), train_data_stds, sim_type, False)[:3]
+        bins, naive, trained = do_simulation(mpath(p256), sim_type, False)[:3]
         all_n.append(naive)
         t_256.append(trained)
     t_256 = np.vstack(t_256)
     for p512 in paths_512:
-        _, naive, trained = do_simulation(mpath(p512), train_data_stds, sim_type, False)[:3]
+        _, naive, trained = do_simulation(mpath(p512), sim_type, False)[:3]
         all_n.append(naive)
         t_512.append(trained)
     t_512 = np.vstack(t_512)
     for p1024 in paths_1024:
-        _, naive, trained = do_simulation(mpath(p1024), train_data_stds, sim_type, False)[:3]
+        _, naive, trained = do_simulation(mpath(p1024), sim_type, False)[:3]
         all_n.append(naive)
         t_1024.append(trained)
     t_1024 = np.vstack(t_1024)
@@ -406,38 +435,28 @@ def create_det_drop_list(network_id, cluster_ids, unit_ids, clust_to_drop, shuff
     return {'t': det_drop}
 
 
-def plot_sim_debug(path, train_data, sim_type, drop_list=None):
+def plot_sim_debug(path, sim_type, drop_list=None):
     """
     Runs indicated simulation on fully trained network, retrieves debug information and plots parameter correlations
     :param path: The model path
-    :param train_data: Training data or equivalent object that provides scaling information
     :param sim_type: Either "r"adial or "l"inear
     :param drop_list: Optional list of vectors that indicate which units should be kept (1) or dropped (0)
     :return:
         [0]: The simulation positions
         [1]: The debug dict
     """
-    mdata = ModelData(path)
-    gp_trained = GpNetworkModel()
-    gp_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-    if sim_type == "l":
-        sim_trained = LinearGradientSimulation(gp_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-        if drop_list is not None:
-            sim_trained.remove = drop_list
-    else:
-        sim_trained = CircleGradSimulation(gp_trained, train_data, 100, 22, 37, TPREFERRED)
-        if drop_list is not None:
-            sim_trained.remove = drop_list
-    all_pos, db_dict = sim_trained.run_simulation(n_steps, True)
+    with SimulationStore("sim_store.hdf5") as sim_store:
+        all_pos, db_dict = sim_store.get_sim_debug(path, sim_type, "trained", drop_list)
     ct = db_dict["curr_temp"]
     val = np.logical_not(np.isnan(ct))
     ct = ct[val]
     pred = db_dict["pred_temp"][val, :]
     selb = db_dict["sel_behav"][val]
     tru = db_dict["true_temp"][val, :]
+    btypes = ["N", "S", "L", "R"]
     # plot counts of different behavior types
     fig, ax = pl.subplots()
-    sns.countplot(selb, order=sim_trained.btypes)
+    sns.countplot(selb, order=btypes)
     sns.despine(fig, ax)
     # for each behavior type, plot scatter of prediction vs. current temperature
     fig, axes = pl.subplots(2, 2)
@@ -445,7 +464,7 @@ def plot_sim_debug(path, train_data, sim_type, drop_list=None):
     for i in range(4):
         axes[i].scatter(ct, pred[:, i], s=2)
         axes[i].set_xlabel("Current temperature")
-        axes[i].set_ylabel("{0} prediction".format(sim_trained.btypes[i]))
+        axes[i].set_ylabel("{0} prediction".format(btypes[i]))
         axes[i].set_title("r = {0:.2g}".format(np.corrcoef(ct, pred[:, i])[0, 1]))
     sns.despine(fig)
     fig.tight_layout()
@@ -454,8 +473,8 @@ def plot_sim_debug(path, train_data, sim_type, drop_list=None):
     axes = axes.ravel()
     for i in range(4):
         axes[i].scatter(tru[:, i], pred[:, i], s=2)
-        axes[i].set_xlabel("{0} tru outcome".format(sim_trained.btypes[i]))
-        axes[i].set_ylabel("{0} prediction".format(sim_trained.btypes[i]))
+        axes[i].set_xlabel("{0} tru outcome".format(btypes[i]))
+        axes[i].set_ylabel("{0} prediction".format(btypes[i]))
         axes[i].set_title("r = {0:.2g}".format(np.corrcoef(tru[:, i], pred[:, i])[0, 1]))
     sns.despine(fig)
     fig.tight_layout()
@@ -480,21 +499,10 @@ def plot_sim_debug(path, train_data, sim_type, drop_list=None):
     ax.set_xlabel("Binned start temperature")
     ax.set_ylabel("Average rank error")
     sns.despine(fig, ax)
-    # also plot occupancy histogram for this simulation
-    counts, bins = np.histogram(sim_trained.temperature(all_pos[:, 0], all_pos[:, 1]), 25)
-    bc = bins[:-1] + np.diff(bins) / 2
-    if sim_type == "r":
-        counts = counts / bc
-    counts = counts / counts.sum()
-    fig, ax = pl.subplots()
-    ax.plot(bc, counts)
-    ax.set_xlabel("Temperature")
-    ax.set_ylabel("Occupancy")
-    sns.despine()
     return all_pos, db_dict
 
 
-def plot_fish_nonfish_analysis(train_data, sim_type="r"):
+def plot_fish_nonfish_analysis(sim_type="r"):
     """
     Analyzes ablations of fish and non-fish clusters and plots
     """
@@ -502,10 +510,9 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
         def bin_pos(all_pos):
             nonlocal sim_type
             nonlocal bins
-            nonlocal sim_naive
             bin_centers = bins[:-1] + np.diff(bins) / 2
             if sim_type == "r":
-                quantpos = np.sqrt(all_pos[:, 0]**2 + all_pos[:, 1]**2)
+                quantpos = np.sqrt(np.sum(all_pos[:, :2] ** 2, 1))
             else:
                 quantpos = all_pos[:, 0]
             h = np.histogram(quantpos, bins)[0].astype(float)
@@ -514,13 +521,16 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
                 h /= bin_centers
             h /= h.sum()
             # convert bin_centers to temperature
-            bin_centers = sim_naive.temperature(bin_centers, np.zeros_like(bin_centers))
+            bin_centers = temp_convert(bin_centers, sim_type)
             return bin_centers, h
 
         def temp_error(all_pos):
             nonlocal sim_type
-            nonlocal sim_naive
-            temp_pos = sim_naive.temperature(all_pos[:, 0], all_pos[:, 1])
+            if sim_type == "r":
+                quantpos = np.sqrt(np.sum(all_pos[:, :2] ** 2, 1))
+            else:
+                quantpos = all_pos[:, 0]
+            temp_pos = temp_convert(quantpos, sim_type)
             if sim_type == "r":
                 # form a weighted average, considering points of larger radius less since just by
                 # chance they will be visited more often
@@ -532,38 +542,19 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
             return np.mean(np.sqrt((temp_pos - TPREFERRED)**2))
 
         nonlocal sim_type
-        nonlocal train_data
         nonlocal fish
         nonlocal non_fish
-        mdata = ModelData(mpath(paths_512[net_id]))
-        gpn_naive = GpNetworkModel()
-        gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
-        gpn_trained = GpNetworkModel()
-        gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-        if sim_type == "l":
-            sim_naive = LinearGradientSimulation(gpn_naive, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_trained = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_fish = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_fish.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
-            sim_nonfish = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_nonfish.remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
-            sim_shuff = LinearGradientSimulation(gpn_trained, train_data, 100, 100, 22, 37, TPREFERRED)
-            sim_shuff.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
-        else:
-            sim_naive = CircleGradSimulation(gpn_naive, train_data, 100, 22, 37, TPREFERRED)
-            sim_trained = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
-            sim_fish = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
-            sim_fish.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
-            sim_nonfish = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
-            sim_nonfish.remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
-            sim_shuff = CircleGradSimulation(gpn_trained, train_data, 100, 22, 37, TPREFERRED)
-            sim_shuff.remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
-        pos_naive, db_naive = sim_naive.run_simulation(n_steps, True)
-        pos_trained, db_trained = sim_trained.run_simulation(n_steps, True)
-        pos_fish, db_fish = sim_fish.run_simulation(n_steps, True)
-        pos_nonfish, db_nonfish = sim_nonfish.run_simulation(n_steps, True)
-        pos_shuff, db_shuff = sim_shuff.run_simulation(n_steps, True)
-        bins = np.linspace(0, sim_naive.max_pos, 100)
+        fish_remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
+        nonfish_remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
+        shuff_remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
+        with SimulationStore("sim_store.hdf5") as sim_store:
+            pos_naive, db_naive = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "naive")
+            pos_trained, db_trained = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained")
+            pos_fish, db_fish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained", fish_remove)
+            pos_nonfish, db_nonfish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained",
+                                                              nonfish_remove)
+            pos_shuff, db_shuff = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained", shuff_remove)
+        bins = np.linspace(0, circle_sim_params["radius"], 100)
         bc, h_naive = bin_pos(pos_naive)
         e_naive = temp_error(pos_naive)
         h_trained = bin_pos(pos_trained)[1]
@@ -707,8 +698,7 @@ def plot_fish_nonfish_analysis(train_data, sim_type="r"):
 
 
 def compute_gradient_bout_frequency(model_path, drop_list=None):
-    def bout_freq(sim: CircleGradSimulation):
-        pos = sim.run_simulation(n_steps)
+    def bout_freq(pos: np.ndarray):
         r = np.sqrt(np.sum(pos[:, :2]**2, 1))  # radial position
         spd = np.r_[0, np.sqrt(np.sum(np.diff(pos[:, :2], axis=0) ** 2, 1))]  # speed
         bs = np.r_[0, np.diff(spd) > 0.00098]  # bout starts
@@ -718,19 +708,12 @@ def compute_gradient_bout_frequency(model_path, drop_list=None):
         cnt_r_bs = np.histogram(r[bs > 0.1], bins)[0]
         bfreq = cnt_r_bs / cnt_r * FRAME_RATE
         return bfreq, bcenters
-    model_data = ModelData(model_path)
-    network = GpNetworkModel()
-    network.load(model_data.ModelDefinition, model_data.LastCheckpoint)
-    ev_path = model_path + '/evolve/generation_weights.npy'
-    weights = np.load(ev_path)
-    w = np.mean(weights[-1, :, :], 0)
-    sim_fixed = CircleGradSimulation(network, std, 100, 22, 37, TPREFERRED)
-    sim_fixed.remove = drop_list
-    bf_fixed, bc = bout_freq(sim_fixed)
-    sim_var = CircleGradSimulation(network, std, 100, 22, 37, TPREFERRED)
-    sim_var.remove = drop_list
-    sim_var.bf_weights = w
-    bf_var, bc = bout_freq(sim_var)
+
+    with SimulationStore("sim_store.hdf5") as sim_store:
+        pos_fixed = sim_store.get_sim_pos(model_path, "r", "trained", drop_list)
+        pos_var = sim_store.get_sim_pos(model_path, "r", "bfevolve", drop_list)
+    bf_fixed, bc = bout_freq(pos_fixed)
+    bf_var, bc = bout_freq(pos_var)
     return bc, bf_fixed, bf_var
 
 
@@ -745,7 +728,7 @@ if __name__ == "__main__":
         print("No standards found attempting to load full training data")
         std = GradientData.load("gd_training_data.hdf5").standards
     # plot radial sim results
-    plot_sim(std, "r")
+    plot_sim("r")
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
