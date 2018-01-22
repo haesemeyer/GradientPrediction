@@ -161,14 +161,16 @@ class SimulationStore(ModelStore):
             self._set_data(pos, mdir, sim_type, network_state, "pos")
             return pos
 
-    def get_sim_debug(self, model_path: str, sim_type: str, network_state: str, drop_list=None) -> dict:
+    def get_sim_debug(self, model_path: str, sim_type: str, network_state: str, drop_list=None):
         """
         Retrieves simulation debug dict from the storage or runs simulation
         :param model_path: The full path to the network model
         :param sim_type: The simulation type, r = radial, l = linear
         :param network_state: The state of the netowrk: naive, trained, ideal or bfevolve
         :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
-        :return: The simulation debug dict
+        :return:
+            [0]: The simulation positions
+            [1]: The simulation debug dict
         """
         self._val_ids(sim_type, network_state)
         if network_state == "ideal":
@@ -178,14 +180,15 @@ class SimulationStore(ModelStore):
             return self._run_sim(model_path, sim_type, network_state, True, drop_list)
         mdir = self.model_dir_name(model_path)
         db_pickle = self._get_data(mdir, sim_type, network_state, "debug")
-        if db_pickle is not None:
+        pos = self._get_data(mdir, sim_type, network_state, "pos")
+        if db_pickle is not None and pos is not None:
             deb_dict = pickle.loads(db_pickle)
-            return deb_dict
+            return pos, deb_dict
         else:
             pos, dbdict = self._run_sim(model_path, sim_type, network_state, True)
             self._set_data(pos, mdir, sim_type, network_state, "pos")
             self._set_data(np.void(pickle.dumps(dbdict)), mdir, sim_type, network_state, "debug")
-            return dbdict
+            return pos, dbdict
 
 
 def loss_file(path):
