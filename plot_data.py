@@ -770,9 +770,29 @@ if __name__ == "__main__":
     # convolve with our kernel
     for i in range(all_cells.shape[1]):
         all_cells[:, i] = ca_convolve(all_cells[:, i], 0, 0, kernel)
-    # perform spectral clustering
+    # perform spectral clustering - or load from file if existent
+    load_success = False
     n_regs = 8
-    clust_ids, coords = cluster_responses(all_cells, n_regs)
+    if os.path.exists("cluster_info.hdf5"):
+        clfile = h5py.File("cluster_info.hdf5", "r")
+        # ensure that same amount of clusters were formed in the file
+        if np.array(clfile["n_regs"]) == n_regs:
+            clust_ids = np.array(clfile["clust_ids"])
+            coords = np.array(clfile["coords"])
+            # ensure that the same number of cells was clustered
+            if clust_ids.size == coords.shape[0] and clust_ids.size == all_cells.shape[1]:
+                load_success = True
+                print("Loaded clusters from file")
+        clfile.close()
+    if not load_success:
+        clust_ids, coords = cluster_responses(all_cells, n_regs)
+        print("Writing cluster information to file")
+        clfile = h5py.File("cluster_info.hdf5", "w")
+        clfile.create_dataset("n_regs", data=n_regs)
+        clfile.create_dataset("clust_ids", data=clust_ids)
+        clfile.create_dataset("coords", data=coords)
+        clfile.close()
+
     # trial average the "cells"
     all_cells = trial_average(all_cells, 3)
 
@@ -791,9 +811,9 @@ if __name__ == "__main__":
     for i in range(n_regs):
         act = cluster_acts[:, i]
         if np.corrcoef(act, temperature[:act.size])[0, 1] < 0:
-            sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_off)
+            sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_off, n_boot=1000)
         else:
-            sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_on)
+            sns.tsplot(all_cells[:, clust_ids == i].T, time, color="C{0}".format(i), ax=ax_on, n_boot=1000)
     ax_off.set_xlabel("Time [s]")
     ax_off.set_ylabel("Cluster average activity")
     ax_on.set_xlabel("Time [s]")
