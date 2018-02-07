@@ -1603,6 +1603,10 @@ class WhiteNoiseSimulation(TemperatureArena):
         self.ang_mean = stds.ang_mean
         self.ang_std = stds.ang_std
         self.btypes = ["N", "S", "L", "R"]
+        # stimulus switching variables - if switch_mean<=0 then stimulus will be truly white, alternating randomly at
+        # every frame. Otherwise switching times will be drawn from gaussian with mean switch_mean and sigma switch_std
+        self.switch_mean = 0
+        self.switch_std = 0
         # optional removal of network units
         self.remove = None
         # optionally weights that will transform the output of the temperature branch of the model into a bout frequency
@@ -1715,7 +1719,23 @@ class WhiteNoiseSimulation(TemperatureArena):
             indices = np.arange(n_samples)[btype_trace == t]
             ixm = indexing_matrix(indices, HIST_SECONDS*FRAME_RATE, FRAME_RATE, int(n_samples))[0]
             return np.mean(stim[ixm]-np.mean(stim), 0)
-        stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
+        if self.switch_mean <= 0:
+            stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
+        else:
+            stim = np.zeros(int(n_samples))
+            counter = 0
+            switch_count = 0
+            last_val = np.random.randn() * self.stim_std + self.stim_mean
+            while counter < stim.size:
+                if switch_count <= 0:
+                    last_val = np.random.randn() * self.stim_std + self.stim_mean
+                    switch_count = -1
+                    while switch_count < 0:
+                        switch_count = np.random.randn() * self.switch_std + self.switch_mean
+                else:
+                    switch_count -= 1
+                stim[counter] = last_val
+                counter += 1
         btype_trace = self.compute_openloop_behavior(stim)[0]
         return kernel(0), kernel(1), kernel(2), kernel(3)
 
