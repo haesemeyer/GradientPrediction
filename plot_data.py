@@ -832,10 +832,17 @@ if __name__ == "__main__":
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]
     for p in paths_512:
-        mdata_wn = ModelData(mpath(p))
+        m_path = mpath(p)
+        mdata_wn = ModelData(m_path)
         gpn_wn = GpNetworkModel()
         gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
-        wna = WhiteNoiseSimulation(std, gpn_wn)
+        wna = WhiteNoiseSimulation(std, gpn_wn, stim_std=2)
+        wna.switch_mean = 5
+        wna.switch_std = 1
+        ev_path = m_path + '/evolve/generation_weights.npy'
+        weights = np.load(ev_path)
+        w = np.mean(weights[-1, :, :], 0)
+        wna.bf_weights = w
         kernels = wna.compute_behavior_kernels(10000000)
         for i, n in enumerate(k_names):
             if n in behav_kernels:
@@ -845,10 +852,11 @@ if __name__ == "__main__":
     kernel_time = np.linspace(-4, 1, behav_kernels['straight'][0].size)
     for n in k_names:
         behav_kernels[n] = np.vstack(behav_kernels[n])
+    plot_kernels = {"straight": behav_kernels["straight"], "turn": (behav_kernels["left"] + behav_kernels["right"])/2}
     fig, ax = pl.subplots()
-    for i, n in enumerate(k_names):
-        sns.tsplot(behav_kernels[n], kernel_time, n_boot=1000, color="C{0}".format(i), ax=ax)
-        ax.plot(kernel_time, np.mean(behav_kernels[n], 0), color="C{0}".format(i), label=n)
+    for i, n in enumerate(plot_kernels):
+        sns.tsplot(plot_kernels[n], kernel_time, n_boot=1000, color="C{0}".format(i), ax=ax)
+        ax.plot(kernel_time, np.mean(plot_kernels[n], 0), color="C{0}".format(i), label=n)
     ax.set_ylabel("Filter kernel")
     ax.set_xlabel("Time around bout [s]")
     ax.legend()
