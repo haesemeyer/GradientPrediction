@@ -1672,10 +1672,15 @@ class WhiteNoiseSimulation(TemperatureArena):
         behav_types = np.full(stimulus.size, -1, np.int8)
         speed_trace = np.zeros_like(stimulus)
         angle_trace = np.zeros_like(stimulus)
+        last_p_move_evaluation = -100  # tracks the frame when we last updated our movement evaluation
+        p_eval = self.p_move
         while step < stimulus.size:
+            # update our movement probability if necessary
+            if step - last_p_move_evaluation >= 20:
+                model_in[0, 0, :, 0] = stimulus[step - history:step]
+                p_eval = self._get_bout_probability(model_in)
+                last_p_move_evaluation = step
             # first invoke the bout clock and pass if we shouldn't select a behavior
-            model_in[0, 0, :, 0] = stimulus[step - history:step]
-            p_eval = self._get_bout_probability(model_in)
             if self._uni_cash.next_rand() > p_eval:
                 step += 1
                 continue
