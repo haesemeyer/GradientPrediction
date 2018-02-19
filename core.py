@@ -184,13 +184,13 @@ class NotInitialized(Exception):
         super().__init__(message)
 
 
-class GpNetworkModel:
+class NetworkModel:
     """
-    Class representing gradient prediction network models
+    Base class for neuronal network models. Offers very basic shared functionality
     """
     def __init__(self):
         """
-        Creates a new GpNetworkModel
+        Creates a new NetworkModel
         """
         self.initialized = False
         # set training defaults
@@ -199,6 +199,85 @@ class GpNetworkModel:
         assert FRAME_RATE % MODEL_RATE == 0
         self.t_bin = FRAME_RATE // MODEL_RATE  # bin input down to 5Hz
         self.binned_size = FRAME_RATE * HIST_SECONDS // self.t_bin
+        # our graph object
+        self._graph = None  # type: tf.Graph
+        # our session object
+        self._session = None  # type: tf.Session
+        # saver object to save progress
+        self._saver = None  # type: tf.train.Saver
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.clear()
+        return False  # re-raise any previous exceptions
+
+    # Protected API
+    def _check_init(self):
+        """
+        Checks if network is initialized and raises exception otherwise
+        """
+        if not self.initialized:
+            raise NotInitialized("Can't perform operation before performing setup of graph.")
+
+    # Public API
+    def load(self, meta_file: str, checkpoint_file: str):
+        """
+        Loads model definitions from model description file and populates data from given checkpoint
+        :param meta_file: The model definition file
+        :param checkpoint_file: The saved model checkpoint (weights, etc.)
+        """
+        self.clear()
+        self._graph = tf.Graph()
+
+    def clear(self):
+        """
+        Clears the network graph
+        """
+        if not self.initialized:
+            return
+        # close session object if it exists
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+        self._graph = None
+        self._saver = None
+        # mark network as not initialized
+        self.initialized = False
+
+    def init_variables(self):
+        """
+        Runs global variable initializer, resetting all values
+        """
+        self._check_init()
+        with self._graph.as_default():
+            self._session.run(tf.global_variables_initializer())
+
+    def save_state(self, chkpoint_file, index, save_meta=True) -> str:
+        """
+        Saves the current state of the network to a checkpoint
+        :param chkpoint_file: The base chkpoint file name
+        :param index: The index of the current chkpoint
+        :param save_meta: Whether to save the meta-graph as well or not
+        :return: The full chkpoint filename and path
+        """
+        self._check_init()
+        with self._graph.as_default():
+            if self._saver is None:
+                self._saver = tf.train.Saver(max_to_keep=None)  # never delete chkpoint files
+            return self._saver.save(self._session, chkpoint_file, global_step=index, write_meta_graph=save_meta)
+
+
+class GpNetworkModel(NetworkModel):
+    """
+    Class representing gradient prediction network models
+    """
+    def __init__(self):
+        """
+        Creates a new GpNetworkModel
+        """
+        super().__init__()
         # initialize fields that will be populated later
         self.n_conv_layers = None
         self.n_units = None
@@ -207,10 +286,6 @@ class GpNetworkModel:
         self._n_mixed_dense = None
         self._n_branch_dense = None
         self._branches = None
-        # our graph object
-        self._graph = None  # type: tf.Graph
-        # our session object
-        self._session = None  # type: tf.Session
         # model fields that are later needed for parameter feeding
         self._keep_prob = None  # drop-out keep probability
         self._det_remove = {}  # vectors for deterministic keeping/removal of individual units
@@ -224,15 +299,6 @@ class GpNetworkModel:
         self._total_loss = None  # type: tf.Tensor
         # the training step to train the network
         self._train_step = None  # type: tf.Operation
-        # saver object to save progress
-        self._saver = None  # type: tf.train.Saver
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.clear()
-        return False  # re-raise any previous exceptions
 
     # Private API
     def _create_unit_lists(self):
@@ -246,13 +312,6 @@ class GpNetworkModel:
         else:
             self._branches = ['t', 's', 'a', 'm', 'o']  # single input network
             self._n_branch_dense = [self.n_units[0]] * self.n_layers_branch
-
-    def _check_init(self):
-        """
-        Checks if network is initialized and raises exception otherwise
-        """
-        if not self.initialized:
-            raise NotInitialized("Can't perform operation before performing setup of graph.")
 
     def _create_hidden_layer(self, branch: str, index: int, prev_out: tf.Tensor, n_units: int) -> tf.Tensor:
         """
@@ -427,8 +486,7 @@ class GpNetworkModel:
         :param meta_file: The model definition file
         :param checkpoint_file: The saved model checkpoint (weights, etc.)
         """
-        self.clear()
-        self._graph = tf.Graph()
+        super().load(meta_file, checkpoint_file)
         with self._graph.as_default():
             # restore graph and variables
             self._session = tf.Session()
@@ -487,40 +545,13 @@ class GpNetworkModel:
         """
         if not self.initialized:
             return
-        # close session object if it exists
-        if self._session is not None:
-            self._session.close()
-            self._session = None
-        self._graph = None
-        self._saver = None
+        super().clear()
         self.n_conv_layers = None
         self.n_units = None
         self.n_layers_branch = None
         self.n_layers_mixed = None
         # mark network as not initialized
         self.initialized = False
-
-    def init_variables(self):
-        """
-        Runs global variable initializer, resetting all values
-        """
-        self._check_init()
-        with self._graph.as_default():
-            self._session.run(tf.global_variables_initializer())
-
-    def save_state(self, chkpoint_file, index, save_meta=True) -> str:
-        """
-        Saves the current state of the network to a checkpoint
-        :param chkpoint_file: The base chkpoint file name
-        :param index: The index of the current chkpoint
-        :param save_meta: Whether to save the meta-graph as well or not
-        :return: The full chkpoint filename and path
-        """
-        self._check_init()
-        with self._graph.as_default():
-            if self._saver is None:
-                self._saver = tf.train.Saver(max_to_keep=None)  # never delete chkpoint files
-            return self._saver.save(self._session, chkpoint_file, global_step=index, write_meta_graph=save_meta)
 
     def train(self, xbatch, ybatch, keep=0.5):
         """
