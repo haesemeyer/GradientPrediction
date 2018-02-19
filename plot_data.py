@@ -561,11 +561,11 @@ def plot_fish_nonfish_analysis(sim_type="r"):
         shuff_remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
         with SimulationStore("sim_store.hdf5") as sim_store:
             pos_naive, db_naive = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "naive")
-            pos_trained, db_trained = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained")
-            pos_fish, db_fish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained", fish_remove)
-            pos_nonfish, db_nonfish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained",
+            pos_trained, db_trained = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve")
+            pos_fish, db_fish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve", fish_remove)
+            pos_nonfish, db_nonfish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve",
                                                               nonfish_remove)
-            pos_shuff, db_shuff = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "trained", shuff_remove)
+            pos_shuff, db_shuff = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve", shuff_remove)
         bins = np.linspace(0, circle_sim_params["radius"], 100)
         bc, h_naive = bin_pos(pos_naive)
         e_naive = temp_error(pos_naive)
