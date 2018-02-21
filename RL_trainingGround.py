@@ -153,7 +153,7 @@ class CircleRLTrainer(RLTrainer):
         return self.radius
 
 
-N_STEPS = 100000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
+N_STEPS = 250000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
 N_EPOCHS = 25  # the number of total training epochs to run
 N_CONV = 5  # the number of convolution filters in the network
 N_LAYERS = 2  # the number of hidden layers in the network
@@ -169,7 +169,7 @@ if __name__ == "__main__":
             print("Epoch {0} of {1} has been completed".format(ep+1, N_EPOCHS))
     running_rewards = np.array(running_rewards)
     fig, ax = pl.subplots()
-    ax.plot(gaussian_filter1d(running_rewards, 25))
+    ax.plot(gaussian_filter1d(running_rewards, 100))
     ax.set_xlabel("Training step")
     ax.set_ylabel("Received rewards (smoothened)")
     sns.despine(fig, ax)
