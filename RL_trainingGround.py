@@ -96,12 +96,7 @@ class RLTrainer(TemperatureArena):
             pref = 0 if self.t_preferred is None else self.t_preferred
             d_start = np.abs(self.temperature(traj[0, 0], traj[0, 1]) - pref)
             d_end = np.abs(self.temperature(traj[-1, 0], traj[-1, 1]) - pref)
-            if d_end < d_start:
-                reward = 1
-            elif d_end > d_start:
-                reward = -1
-            else:
-                reward = 0
+            reward = d_start - d_end
             all_rewards.append(reward)
             # train network
             if train:
