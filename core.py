@@ -897,7 +897,7 @@ class SimpleRLNetwork(NetworkModel):
         Creates lists of hidden unit counts and branch list according to network configuration
         """
         self._det_remove = {}
-        self._n_dense = [self.n_units[1]] * self.n_layers
+        self._n_dense = [self.n_units] * self.n_layers
         self._branches = ['t', 'o']
 
     def _create_branch(self, branch: str, prev_out: tf.Tensor) -> tf.Tensor:
@@ -923,7 +923,7 @@ class SimpleRLNetwork(NetworkModel):
         """
         w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 2], self.w_decay)
         b = create_bias_var(self.cvn("BIAS", 'o', 0), [2])
-        out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
+        out = tf.nn.relu((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', 0))
         return out
 
     def _create_feed_dict(self, x_in, reward=None, pick=None, keep=1.0, removal=None) -> dict:
@@ -944,6 +944,8 @@ class SimpleRLNetwork(NetworkModel):
             f_dict[self._pick] = pick
         # Fill deterministic removal part of feed dict
         for b in self._branches:
+            if b == 'o':
+                continue
             for i, dr in enumerate(self._det_remove[b]):
                 s = dr.shape[0].value
                 if removal is None or b not in removal:
@@ -987,17 +989,17 @@ class SimpleRLNetwork(NetworkModel):
             # model input: ONLINE x Temp x HISTORYSIZE x 1 CHANNEL
             self._x_in = tf.placeholder(tf.float32, [1, 1, FRAME_RATE * HIST_SECONDS, 1], "x_in")
             # reward values: ONLINE x Behavior (Note: Only picked behavior will get rewarded!)
-            self._reward = tf.placeholder(tf.float32, [1, 1], "rewards")
+            self._reward = tf.placeholder(tf.float32, [1], name="rewards")
             # index of the picked behavior (either 0 or 1, i.e. straight or turn)
-            self._pick = tf.placeholder(tf.int8, [1, 1], "picks")
+            self._pick = tf.placeholder(tf.int32, [1], name="picks")
             # data binning layer
             xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
             # create convolution layer and deep layers
             conv = self._create_convolution_layer('t', xin_pool)
             deep_out = self._create_branch('t', conv)
             self._value_out = self._create_values(deep_out)
-            self._responsible_out = tf.slice(self._value_out, self._pick, 1, "responsible_out")
-            self._loss = -(tf.log(self._responsible_out) * self._reward)
+            self._responsible_out = tf.slice(self._value_out[0, :], self._pick, [1], "responsible_out")
+            self._loss = -(tf.log(self._responsible_out) * self._reward)[0]
             tf.add_to_collection("losses", self._loss)
             # compute the total loss which includes our weight-decay
             self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
