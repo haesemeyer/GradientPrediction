@@ -191,17 +191,21 @@ N_EPOCHS = 25  # the number of total training epochs to run
 N_CONV = 5  # the number of convolution filters in the network
 N_LAYERS = 2  # the number of hidden layers in the network
 N_UNITS = 64  # the number of units in each network hidden layer
+T_PREFERRED = 26
 
 if __name__ == "__main__":
     running_rewards = []  # for each performed step the received reward
+    ep_avg_grad_error = []  # for each episode the average deviation from the preferred temperature
     with SimpleRLNetwork() as rl_net:
         rl_net.setup(N_CONV, N_UNITS, N_LAYERS)
         for ep in range(N_EPOCHS):
-            circ_train = CircleRLTrainer(rl_net, 100, 22, 37, 26)
-            ep_rewards = circ_train.run_sim(N_STEPS, True)[1]
+            circ_train = CircleRLTrainer(rl_net, 100, 22, 37, T_PREFERRED)
+            ep_pos, ep_rewards = circ_train.run_sim(N_STEPS, True)
+            temps = circ_train.temperature(ep_pos[:, 0], ep_pos[:, 1])
+            avg_error = np.mean(np.abs(temps-T_PREFERRED))
+            ep_avg_grad_error.append(avg_error)
             running_rewards += ep_rewards
-            print("Epoch {0} of {1} has been completed. Average reward: {2}".format(ep+1, N_EPOCHS,
-                                                                                    np.mean(ep_rewards)))
+            print("Epoch {0} of {1} has been completed. Average gradient error: {2}".format(ep+1, N_EPOCHS, avg_error))
         weights_conv1 = rl_net.convolution_data[0]
         weights_conv1 = weights_conv1['t']
 
@@ -213,9 +217,16 @@ if __name__ == "__main__":
         sns.heatmap(weights_conv1[:, :, 0, j], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
         a.axis("off")
 
+    ep_avg_grad_error = np.array(ep_avg_grad_error)
     running_rewards = np.array(running_rewards)
     fig, ax = pl.subplots()
     ax.plot(gaussian_filter1d(running_rewards, 250))
     ax.set_xlabel("Training step")
-    ax.set_ylabel("Received rewards (smoothened)")
+    ax.set_ylabel("Received rewards")
+    sns.despine(fig, ax)
+
+    fig, ax = pl.subplots()
+    ax.plot(gaussian_filter1d(ep_avg_grad_error, 3), 'o')
+    ax.set_xlabel("Training episode")
+    ax.set_ylabel("Average gradient error [C]")
     sns.despine(fig, ax)
