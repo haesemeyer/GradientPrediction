@@ -1061,6 +1061,18 @@ class SimpleRLNetwork(NetworkModel):
             else:
                 return 1
 
+    @property
+    def convolution_data(self):
+        """
+        The weights and biases of the convolution layer(s)
+        """
+        self._check_init()
+        with self._graph.as_default():
+            g = self._session.graph
+            w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in ['t']}
+            b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in ['t']}
+        return w, b
+
 
 class RandCash:
     """
