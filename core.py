@@ -1004,7 +1004,8 @@ class SimpleRLNetwork(NetworkModel):
             # compute the total loss which includes our weight-decay
             self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
             # create training step
-            self._train_step = create_train_step(self._total_loss)
+            self._train_step = tf.train.AdamOptimizer(1e-6).minimize(self._total_loss)
+            # self._train_step = create_train_step(self._total_loss)
             # store our training operation
             tf.add_to_collection('train_op', self._train_step)
             # create session
@@ -1050,6 +1051,8 @@ class SimpleRLNetwork(NetworkModel):
         :return: The index of the chosen action (straight=0, turn=1)
         """
         v = self.get_values(x_in, keep, det_drop).ravel()
+        if np.any(np.isnan(v)):
+            raise ValueError("Invalid probabilities returned")
         if np.random.rand() < p_explore:
             return np.random.randint(2)
         else:
