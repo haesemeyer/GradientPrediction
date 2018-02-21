@@ -187,7 +187,7 @@ class CircleRLTrainer(RLTrainer):
 
 
 N_STEPS = 500000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
-N_EPOCHS = 25  # the number of total training epochs to run
+N_EPOCHS = 250  # the number of total training epochs to run
 N_CONV = 5  # the number of convolution filters in the network
 N_LAYERS = 2  # the number of hidden layers in the network
 N_UNITS = 64  # the number of units in each network hidden layer
@@ -202,7 +202,11 @@ if __name__ == "__main__":
             circ_train = CircleRLTrainer(rl_net, 100, 22, 37, T_PREFERRED)
             ep_pos, ep_rewards = circ_train.run_sim(N_STEPS, True)
             temps = circ_train.temperature(ep_pos[:, 0], ep_pos[:, 1])
-            avg_error = np.mean(np.abs(temps-T_PREFERRED))
+            weights = 1 / np.sqrt(np.sum(ep_pos[:, :2] ** 2, 1))
+            weights[np.isinf(weights)] = 0  # occurs when 0,0 was picked as starting point only
+            sum_of_weights = np.nansum(weights)
+            weighted_sum = np.nansum(np.sqrt((temps - T_PREFERRED) ** 2) * weights)
+            avg_error = weighted_sum / sum_of_weights
             ep_avg_grad_error.append(avg_error)
             running_rewards += ep_rewards
             print("Epoch {0} of {1} has been completed. Average gradient error: {2}".format(ep+1, N_EPOCHS, avg_error))
