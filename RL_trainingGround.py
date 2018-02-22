@@ -188,16 +188,22 @@ class CircleRLTrainer(RLTrainer):
 
 N_STEPS = 500000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
 N_EPOCHS = 250  # the number of total training epochs to run
-N_CONV = 5  # the number of convolution filters in the network
-N_LAYERS = 2  # the number of hidden layers in the network
-N_UNITS = 64  # the number of units in each network hidden layer
-T_PREFERRED = 26
+N_CONV = 40  # the number of convolution filters in the network
+N_LAYERS = 3  # the number of hidden layers in the network
+N_UNITS = 512  # the number of units in each network hidden layer
+T_PREFERRED = 26  # the preferred temperature after training
+SAVE_EVERY = 100  # save network state every this many episodes
 
 if __name__ == "__main__":
+    chk_file = "./model_data/simpleRLModel.ckpt"
     running_rewards = []  # for each performed step the received reward
     ep_avg_grad_error = []  # for each episode the average deviation from the preferred temperature
+    global_count = 0
     with SimpleRLNetwork() as rl_net:
         rl_net.setup(N_CONV, N_UNITS, N_LAYERS)
+        # save naive model including full graph
+        save_path = rl_net.save_state(chk_file, 0)
+        print("Model saved in file: %s" % save_path)
         for ep in range(N_EPOCHS):
             circ_train = CircleRLTrainer(rl_net, 100, 22, 37, T_PREFERRED)
             ep_pos, ep_rewards = circ_train.run_sim(N_STEPS, True)
@@ -210,6 +216,12 @@ if __name__ == "__main__":
             ep_avg_grad_error.append(avg_error)
             running_rewards += ep_rewards
             print("Epoch {0} of {1} has been completed. Average gradient error: {2}".format(ep+1, N_EPOCHS, avg_error))
+            global_count += 1
+            if global_count % SAVE_EVERY == 0:
+                save_path = rl_net.save_state(chk_file, global_count, False)
+                print("Model saved in file: %s" % save_path)
+        save_path = rl_net.save_state(chk_file, global_count, False)
+        print("Final model saved in file: %s" % save_path)
         weights_conv1 = rl_net.convolution_data[0]
         weights_conv1 = weights_conv1['t']
 
