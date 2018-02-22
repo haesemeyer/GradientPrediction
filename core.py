@@ -989,9 +989,9 @@ class SimpleRLNetwork(NetworkModel):
             # model input: ONLINE x Temp x HISTORYSIZE x 1 CHANNEL
             self._x_in = tf.placeholder(tf.float32, [1, 1, FRAME_RATE * HIST_SECONDS, 1], "x_in")
             # reward values: ONLINE x Behavior (Note: Only picked behavior will get rewarded!)
-            self._reward = tf.placeholder(tf.float32, [1], name="rewards")
+            self._reward = tf.placeholder(tf.float32, [1], name="reward")
             # index of the picked behavior (either 0 or 1, i.e. straight or turn)
-            self._pick = tf.placeholder(tf.int32, [1], name="picks")
+            self._pick = tf.placeholder(tf.int32, [1], name="pick")
             # data binning layer
             xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
             # create convolution layer and deep layers
@@ -1014,6 +1014,52 @@ class SimpleRLNetwork(NetworkModel):
             self.initialized = True
             # intialize all variables
             self.init_variables()
+
+    def load(self, meta_file: str, checkpoint_file: str):
+        """
+        Loads model definitions from model description file and populates data from given checkpoint
+        :param meta_file: The model definition file
+        :param checkpoint_file: The saved model checkpoint (weights, etc.)
+        """
+        super().load(meta_file, checkpoint_file)
+        with self._graph.as_default():
+            # restore graph and variables
+            self._session = tf.Session()
+            saver = tf.train.import_meta_graph(meta_file)
+            saver.restore(self._session, checkpoint_file)
+            graph = self._session.graph
+            self._value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
+            self._responsible_out = graph.get_tensor_by_name("responsible_out:0")
+            self._x_in = graph.get_tensor_by_name("x_in:0")
+            self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
+            self._reward = graph.get_tensor_by_name("reward:0")
+            self._pick = graph.get_tensor_by_name("pick:0")
+            self._branches = ['t', 'o']
+            # collect deterministic removal units
+            for b in self._branches:
+                try:
+                    graph.get_tensor_by_name(self.cvn("REMOVE", b, 0)+":0")
+                    self._det_remove[b] = []
+                    i = 0
+                    try:
+                        while True:
+                            self._det_remove[b].append(graph.get_tensor_by_name(self.cvn("REMOVE", b, i)+":0"))
+                            i += 1
+                    except KeyError:
+                        pass
+                except KeyError:
+                    continue
+            self.n_layers = len(self._det_remove['t'])
+            self._n_dense = [self._det_remove['t'][i].shape[0].value for i in range(self.n_layers)]
+            self.n_units = self._n_dense[0]
+            # retrieve training step
+            self._train_step = graph.get_collection("train_op")[0]
+            # set up loss calculation
+            self._loss = -(tf.log(self._responsible_out) * self._reward)[0]
+        self.initialized = True
+        # use convolution data biases to get number of convolution layers
+        conv_biases = self.convolution_data[1]
+        self.n_conv_layers = conv_biases.popitem()[1].shape[0]
 
     def clear(self):
         """
