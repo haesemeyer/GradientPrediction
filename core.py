@@ -1015,6 +1015,19 @@ class SimpleRLNetwork(NetworkModel):
             # intialize all variables
             self.init_variables()
 
+    def clear(self):
+        """
+        Clears the network graph
+        """
+        if not self.initialized:
+            return
+        super().clear()
+        self.n_conv_layers = None
+        self.n_units = None
+        self.n_layers = None
+        # mark network as not initialized
+        self.initialized = False
+
     def train(self, x_in, reward, pick, keep=0.5):
         """
         Runs a single move training step
