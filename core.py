@@ -1008,7 +1008,14 @@ class SimpleRLNetwork(NetworkModel):
             # compute the total loss which includes our weight-decay
             self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
             # create training step
-            self._train_step = tf.train.AdamOptimizer(1e-6).minimize(self._total_loss)
+            optimizer = tf.train.AdamOptimizer(1e-6)
+            gradients, variables = zip(*optimizer.compute_gradients(self._total_loss))
+            # The following norm clipping value was chosen by writing summary information about maximal gradient norms
+            # during ~250k training steps. A value of 5.0 was exceeded vary rarily - this clipping is done to prevent
+            # sudden collapse of weights to NaN
+            gradients = [None if gradient is None else tf.clip_by_norm(gradient, 5.0) for gradient in gradients]
+            self._train_step = optimizer.apply_gradients(zip(gradients, variables))
+            # self._train_step = tf.train.AdamOptimizer(1e-6).minimize(self._total_loss)
             # self._train_step = create_train_step(self._total_loss)
             # store our training operation
             tf.add_to_collection('train_op', self._train_step)
@@ -1090,7 +1097,8 @@ class SimpleRLNetwork(NetworkModel):
         if reward.size > 1:
             warn("Providing more than one concurrent training sample is discouraged since credit assignment unclear.")
         with self._graph.as_default():
-            self._train_step.run(self._create_feed_dict(x_in, reward, pick, keep), self._session)
+            fd = self._create_feed_dict(x_in, reward, pick, keep)
+            self._train_step.run(fd, self._session)
 
     def get_values(self, x_in, keep=1.0, det_drop=None) -> np.ndarray:
         """
