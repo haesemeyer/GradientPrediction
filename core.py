@@ -926,22 +926,26 @@ class SimpleRLNetwork(NetworkModel):
         out = tf.nn.softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', 0))
         return out
 
-    def _create_feed_dict(self, x_in, reward=None, pick=None, keep=1.0, removal=None) -> dict:
+    def _create_feed_dict(self, x_in, rewards=None, picks=None, keep=1.0, removal=None) -> dict:
         """
         Create network feed dict
         :param x_in: The network input value
-        :param reward: The delivered reward (optional)
-        :param pick: The chosen unit (optional but needs to be present if reward != None)
+        :param rewards: The delivered rewards
+        :param picks: The chosen units (optional but needs to be present if reward != None)
         :param keep: The dropout probability for keeping all units
         :param removal: Deterministic keep/removal vectors
         :return: The feeding dict to pass to the network
         """
         f_dict = {self._x_in: x_in, self._keep_prob: keep}
-        if reward is not None:
-            f_dict[self._reward] = reward
-            if pick is None:
-                raise ValueError("If reward is provided, pick needs to be provided!")
-            f_dict[self._pick] = pick
+        if rewards is not None:
+            # augment rewards to 2D if necessary
+            if rewards.ndim == 1:
+                rewards = rewards[:, None]
+            f_dict[self._reward] = rewards
+            if picks is None or picks.size != rewards.size:
+                raise ValueError("If rewards are provided, picks need to be provided with the same number of samples!")
+            picks = np.c_[np.arange(picks.size)[:, None], picks[:, None]]
+            f_dict[self._pick] = picks
         # Fill deterministic removal part of feed dict
         for b in self._branches:
             if b == 'o':
@@ -986,20 +990,20 @@ class SimpleRLNetwork(NetworkModel):
                                            for i in range(self.n_layers)]
             # dropout probability placeholder
             self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
-            # model input: ONLINE x Temp x HISTORYSIZE x 1 CHANNEL
-            self._x_in = tf.placeholder(tf.float32, [1, 1, FRAME_RATE * HIST_SECONDS, 1], "x_in")
-            # reward values: ONLINE x Behavior (Note: Only picked behavior will get rewarded!)
-            self._reward = tf.placeholder(tf.float32, [1], name="reward")
-            # index of the picked behavior (either 0 or 1, i.e. straight or turn)
-            self._pick = tf.placeholder(tf.int32, [1], name="pick")
+            # model input: NSAMPLES x Temp x HISTORYSIZE x 1 CHANNEL
+            self._x_in = tf.placeholder(tf.float32, [None, 1, FRAME_RATE * HIST_SECONDS, 1], "x_in")
+            # reward values: NSAMPLES x 1 (Note: Only picked behavior will get rewarded!)
+            self._reward = tf.placeholder(tf.float32, [None, 1], name="reward")
+            # sample index and index of the picked behavior: NSAMPLES x 2 (either 0 or 1, i.e. straight or turn)
+            self._pick = tf.placeholder(tf.int32, [None, 2], name="pick")
             # data binning layer
             xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
             # create convolution layer and deep layers
             conv = self._create_convolution_layer('t', xin_pool)
             deep_out = self._create_branch('t', conv)
             self._value_out = self._create_values(deep_out)
-            self._responsible_out = tf.slice(self._value_out[0, :], self._pick, [1], "responsible_out")
-            self._loss = -(tf.log(self._responsible_out) * self._reward)[0]
+            self._responsible_out = tf.gather_nd(self._value_out, self._pick, "responsible_out")
+            self._loss = tf.reduce_sum(-(tf.log(self._responsible_out) * self._reward))
             tf.add_to_collection("losses", self._loss)
             # compute the total loss which includes our weight-decay
             self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
@@ -1074,7 +1078,7 @@ class SimpleRLNetwork(NetworkModel):
         # mark network as not initialized
         self.initialized = False
 
-    def train(self, x_in, reward, pick, keep=0.5):
+    def train(self, x_in, reward: np.ndarray, pick: np.ndarray, keep=0.5):
         """
         Runs a single move training step
         :param x_in: The network input
@@ -1083,6 +1087,8 @@ class SimpleRLNetwork(NetworkModel):
         :param keep: The keep probability of each unit
         """
         self._check_init()
+        if reward.size > 1:
+            warn("Providing more than one concurrent training sample is discouraged since credit assignment unclear.")
         with self._graph.as_default():
             self._train_step.run(self._create_feed_dict(x_in, reward, pick, keep), self._session)
 
