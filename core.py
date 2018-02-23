@@ -1113,12 +1113,11 @@ class SimpleRLNetwork(NetworkModel):
             v = self._value_out.eval(self._create_feed_dict(x_in, keep=keep, removal=det_drop), session=self._session)
         return v
 
-    def choose_action(self, x_in, p_explore=0.01, keep=1.0, det_drop=None):
+    def choose_action(self, x_in, keep=1.0, det_drop=None):
         """
         Our policy. Calculate value of each action given input. Choose random action with p_explore probability
         and higher-valued action otherwise
         :param x_in: The temperature history as network input
-        :param p_explore: The probability to explore instead of exploit
         :param keep: The keep probability of each unit
         :param det_drop: The deterministic keep/drop of each unit
         :return: The index of the chosen action (straight=0, turn=1)
@@ -1126,16 +1125,13 @@ class SimpleRLNetwork(NetworkModel):
         v = self.get_values(x_in, keep, det_drop).ravel()
         if np.any(np.isnan(v)):
             raise ValueError("Invalid probabilities returned")
-        if np.random.rand() < p_explore:
-            return np.random.randint(2)
+        # we only have two actions - so these probabilities are in fact redundant at the moment
+        # hence only compare to first
+        dec = np.random.rand()
+        if dec < v[0]:
+            return 0
         else:
-            # we only have two actions - so these probabilities are in fact redundant at the moment
-            # hence only compare to first
-            dec = np.random.rand()
-            if dec < v[0]:
-                return 0
-            else:
-                return 1
+            return 1
 
     @property
     def convolution_data(self):

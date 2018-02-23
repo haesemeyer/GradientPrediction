@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns
 from scipy.ndimage import gaussian_filter1d
+import h5py
 
 
 class RLTrainer(TemperatureArena):
@@ -117,7 +118,7 @@ class RLTrainer(TemperatureArena):
                 continue
             model_in[0, 0, :, 0] = self._standardize(self.temperature(pos[step - history:step, 0],
                                                                       pos[step - history:step, 1]))
-            chosen = self.model.choose_action(model_in, 0.01, 0.5 if train else 1.0, self.remove)
+            chosen = self.model.choose_action(model_in, 0.5 if train else 1.0, self.remove)
             bt = self.select_behavior(chosen)
             traj = self.get_bout_trajectory(pos[step - 1, :], bt)
             # compute reward
@@ -190,10 +191,10 @@ class CircleRLTrainer(RLTrainer):
 
 
 N_STEPS = 500000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
-N_EPOCHS = 250  # the number of total training epochs to run
-N_CONV = 40  # the number of convolution filters in the network
+N_EPOCHS = 4000  # the number of total training epochs to run
+N_CONV = 20  # the number of convolution filters in the network
 N_LAYERS = 3  # the number of hidden layers in the network
-N_UNITS = 512  # the number of units in each network hidden layer
+N_UNITS = 128  # the number of units in each network hidden layer
 T_PREFERRED = 26  # the preferred temperature after training
 SAVE_EVERY = 100  # save network state every this many episodes
 
@@ -249,3 +250,10 @@ if __name__ == "__main__":
     ax.set_xlabel("Training episode")
     ax.set_ylabel("Average gradient error [C]")
     sns.despine(fig, ax)
+
+    # save loss evaluations to file
+    with h5py.File("./model_data/losses.hdf5", "x") as dfile:
+        dfile.create_dataset("episodes", data=np.arange(N_EPOCHS))
+        dfile.create_dataset("ep_avg_grad_error", data=ep_avg_grad_error)
+        dfile.create_dataset("steps", data=np.arange(running_rewards.size))
+        dfile.create_dataset("running_rewards", data=running_rewards)
