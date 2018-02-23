@@ -128,7 +128,10 @@ class RLTrainer(TemperatureArena):
             all_rewards.append(reward)
             # train network
             if train:
-                self.model.train(model_in, [reward], [chosen], 0.5)
+                # transform reward and chosen into np.array
+                reward = np.array([reward])
+                chosen = np.array([chosen])
+                self.model.train(model_in, reward, chosen, 0.5)
             # implement trajectory
             if step + self.blen <= nsteps + burn_period:
                 pos[step:step + self.blen, :] = traj
