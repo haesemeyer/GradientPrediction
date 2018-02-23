@@ -199,6 +199,7 @@ class NetworkModel:
         assert FRAME_RATE % MODEL_RATE == 0
         self.t_bin = FRAME_RATE // MODEL_RATE  # bin input down to 5Hz
         self.binned_size = FRAME_RATE * HIST_SECONDS // self.t_bin
+        self._x_in = None  # network inputs
         # our branches
         self._branches = None
         # the number of our convolution layers
@@ -311,6 +312,15 @@ class NetworkModel:
                 self._saver = tf.train.Saver(max_to_keep=None)  # never delete chkpoint files
             return self._saver.save(self._session, chkpoint_file, global_step=index, write_meta_graph=save_meta)
 
+    @property
+    def input_dims(self):
+        """
+        The network's input dimensions
+        """
+        self._check_init()
+        with self._graph.as_default():
+            return self._x_in.shape.as_list()
+
     @staticmethod
     def cvn(vartype: str, branch: str, index: int) -> str:
         """
@@ -344,7 +354,6 @@ class GpNetworkModel(NetworkModel):
         self._n_branch_dense = None
         # model fields that are later needed for parameter feeding
         self._keep_prob = None  # drop-out keep probability
-        self._x_in = None  # network inputs
         self._y_ = None  # true responses (for training)
         # network output
         self._m_out = None  # type: tf.Tensor
@@ -853,15 +862,6 @@ class GpNetworkModel(NetworkModel):
             b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
         return w, b
 
-    @property
-    def input_dims(self):
-        """
-        The network's input dimensions
-        """
-        self._check_init()
-        with self._graph.as_default():
-            return self._x_in.shape.as_list()
-
 
 class SimpleRLNetwork(NetworkModel):
     """
@@ -878,7 +878,6 @@ class SimpleRLNetwork(NetworkModel):
         self._n_dense = None
         # model fields that are later needed for parameter feeding
         self._keep_prob = None  # drop-out keep probability
-        self._x_in = None  # network inputs
         self._reward = None  # reward delivered (for training)
         self._pick = None  # the behaviors that was chosen and led to the reward above
         self._responsible_out = None  # the output responsible for the current reward
@@ -1132,6 +1131,52 @@ class SimpleRLNetwork(NetworkModel):
             return 0
         else:
             return 1
+
+    def final_hidden_output(self, xbatch, det_drop=None) -> np.ndarray:
+        """
+        Computes the activations of all units in the last hidden layer of the network
+        :param xbatch: The network input
+        :param det_drop: The deterministic keep/drop of each unit
+        :return: The activations of the last hidden network layer
+        """
+        self._check_init()
+        # obtain the name of the last hidden layer
+        tensor_name = self.cvn("HIDDEN", 't', self.n_layers-1)
+        tensor_name = tensor_name + ":0"
+        with self._graph.as_default():
+            fd = self._create_feed_dict(xbatch, removal=det_drop)
+            tensor = self._graph.get_tensor_by_name(tensor_name)
+            layer_out = tensor.eval(fd, session=self._session)
+        return layer_out
+
+    def unit_stimulus_responses(self, temperature, temp_mean, temp_std) -> dict:
+        """
+        Computes and returns the responses of each unit in the network in response to a stimulus
+        :param temperature: The temperature stimulus in C
+        :param temp_mean: The temperature average when the network was trained
+        :param temp_std: The temperature standard deviation when the network was trained
+        :return: Branch-wise dictionary of lists with n_hidden elements, each an array of time x n_units activations
+        """
+        self._check_init()
+        temperature = (temperature - temp_mean) / temp_std
+        with self._graph.as_default():
+            history = self.input_dims[2]
+            activity = {}
+            ix = indexing_matrix(np.arange(temperature.size), history - 1, 0, temperature.size)[0]
+            model_in = np.zeros((ix.shape[0], 1, history, 1))
+            model_in[:, 0, :, 0] = temperature[ix]
+            for b in self._branches:
+                if b == 'o':
+                    activity[b] = [self.get_values(model_in)]
+                    continue
+                for i in range(self.n_layers):
+                    h = self._session.graph.get_tensor_by_name(self.cvn("HIDDEN", b, i)+":0")
+                    fd = self._create_feed_dict(model_in, keep=1.0)
+                    if b in activity:
+                        activity[b].append(h.eval(feed_dict=fd, session=self._session))
+                    else:
+                        activity[b] = [h.eval(feed_dict=fd, session=self._session)]
+            return activity
 
     @property
     def convolution_data(self):
