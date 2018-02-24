@@ -883,6 +883,7 @@ class SimpleRLNetwork(NetworkModel):
         self._responsible_out = None  # the output responsible for the current reward
         # network output
         self._value_out = None  # type: tf.Tensor
+        self._log_value_out = None  # type: tf.Tensor
         # the reward based loss (loss w.o. weight decay)
         self._loss = None  # type: tf.Tensor
         # total loss across the network
@@ -914,16 +915,17 @@ class SimpleRLNetwork(NetworkModel):
             last = tf.nn.dropout(last, self._keep_prob, name=self.cvn("DROP", branch, i))
         return last
 
-    def _create_values(self, prev_out: tf.Tensor) -> tf.Tensor:
+    def _create_values(self, prev_out: tf.Tensor):
         """
         Creates the output layer for reporting predicted temperature of all four behaviors
         :param prev_out: The output of the previous layer
-        :return: output
+        :return: output, log_output
         """
         w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 2], self.w_decay)
         b = create_bias_var(self.cvn("BIAS", 'o', 0), [2])
         out = tf.nn.softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', 0))
-        return out
+        log_out = tf.nn.log_softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', -1))
+        return out, log_out
 
     def _create_feed_dict(self, x_in, rewards=None, picks=None, keep=1.0, removal=None) -> dict:
         """
@@ -1000,9 +1002,9 @@ class SimpleRLNetwork(NetworkModel):
             # create convolution layer and deep layers
             conv = self._create_convolution_layer('t', xin_pool)
             deep_out = self._create_branch('t', conv)
-            self._value_out = self._create_values(deep_out)
-            self._responsible_out = tf.gather_nd(self._value_out, self._pick, "responsible_out")
-            self._loss = tf.reduce_sum(-(tf.log(self._responsible_out) * self._reward))
+            self._value_out, self._log_value_out = self._create_values(deep_out)
+            self._responsible_out = tf.gather_nd(self._log_value_out, self._pick, "responsible_out")
+            self._loss = -tf.reduce_sum(self._responsible_out * self._reward)
             tf.add_to_collection("losses", self._loss)
             # compute the total loss which includes our weight-decay
             self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
@@ -1039,6 +1041,7 @@ class SimpleRLNetwork(NetworkModel):
             saver.restore(self._session, checkpoint_file)
             graph = self._session.graph
             self._value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
+            self._log_value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', -1) + ":0")
             self._responsible_out = graph.get_tensor_by_name("responsible_out:0")
             self._x_in = graph.get_tensor_by_name("x_in:0")
             self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
