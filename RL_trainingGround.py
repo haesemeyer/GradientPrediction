@@ -118,7 +118,7 @@ class RLTrainer(TemperatureArena):
                 continue
             model_in[0, 0, :, 0] = self._standardize(self.temperature(pos[step - history:step, 0],
                                                                       pos[step - history:step, 1]))
-            chosen = self.model.choose_action(model_in, 0.5 if train else 1.0, self.remove)
+            chosen = self.model.choose_action(model_in, 0.01, keep=0.5 if train else 1.0, det_drop=self.remove)
             bt = self.select_behavior(chosen)
             traj = self.get_bout_trajectory(pos[step - 1, :], bt)
             # compute reward
