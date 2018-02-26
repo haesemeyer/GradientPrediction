@@ -1009,12 +1009,8 @@ class SimpleRLNetwork(NetworkModel):
             # compute the total loss which includes our weight-decay
             self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
             # create training step
-            optimizer = tf.train.AdamOptimizer(1e-6)
+            optimizer = tf.train.AdamOptimizer(1e-5)
             gradients, variables = zip(*optimizer.compute_gradients(self._total_loss))
-            # The following norm clipping value was chosen by writing summary information about maximal gradient norms
-            # during ~250k training steps. A value of 5.0 was exceeded vary rarily - this clipping is done to prevent
-            # sudden collapse of weights to NaN
-            gradients = [None if gradient is None else tf.clip_by_norm(gradient, 5.0) for gradient in gradients]
             self._train_step = optimizer.apply_gradients(zip(gradients, variables))
             # self._train_step = tf.train.AdamOptimizer(1e-6).minimize(self._total_loss)
             # self._train_step = create_train_step(self._total_loss)
