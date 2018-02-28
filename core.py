@@ -890,6 +890,8 @@ class SimpleRLNetwork(NetworkModel):
         self._total_loss = None  # type: tf.Tensor
         # the training step to train the network
         self._train_step = None  # type: tf.Operation
+        # create cash of uniform random numbers
+        self._uni_cash = RandCash(1000, lambda s: np.random.rand(s))
 
     # Private API
     def _create_unit_lists(self):
@@ -1121,14 +1123,14 @@ class SimpleRLNetwork(NetworkModel):
         :param det_drop: The deterministic keep/drop of each unit
         :return: The index of the chosen action (straight=0, turn=1)
         """
-        if np.random.rand() < p_explore:
+        if self._uni_cash.next_rand() < p_explore:
             return np.random.randint(2)
         v = self.get_values(x_in, keep, det_drop).ravel()
         if np.any(np.isnan(v)):
             raise ValueError("Invalid probabilities returned")
         # we only have two actions - so these probabilities are in fact redundant at the moment
         # hence only compare to first
-        dec = np.random.rand()
+        dec = self._uni_cash.next_rand()
         if dec < v[0]:
             return 0
         else:
