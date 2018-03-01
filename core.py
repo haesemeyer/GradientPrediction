@@ -337,13 +337,13 @@ class NetworkModel:
         return "{0}_{1}_{2}".format(vartype, branch, index)
 
 
-class ZfGpNetworkModel(NetworkModel):
+class GpNetworkModel(NetworkModel):
     """
-    Class representing gradient prediction network models
+    Base class of branched gradient prediction network models
     """
     def __init__(self):
         """
-        Creates a new ZfGpNetworkModel
+        Creates a new GpNetworkModel
         """
         super().__init__()
         # initialize fields that will be populated later
@@ -364,7 +364,7 @@ class ZfGpNetworkModel(NetworkModel):
         # the training step to train the network
         self._train_step = None  # type: tf.Operation
 
-    # Private API
+    # Protected API
     def _create_unit_lists(self):
         """
         Creates lists of hidden unit counts and branch list according to network configuration
@@ -377,16 +377,19 @@ class ZfGpNetworkModel(NetworkModel):
             self._branches = ['t', 's', 'a', 'm', 'o']  # single input network
             self._n_branch_dense = [self.n_units[0]] * self.n_layers_branch
 
+    def _create_real_out_placeholder(self) -> tf.Tensor:
+        """
+        Creates the 2D placeholder for the true labels
+        Abstract method in this baseclass
+        """
+        raise NotImplementedError("ABSTRACT")
+
     def _create_output(self, prev_out: tf.Tensor) -> tf.Tensor:
         """
-        Creates the output layer for reporting predicted temperature of all four behaviors
-        :param prev_out: The output of the previous layer
-        :return: output
+        Creates the output layer for reporting predicted temperature of all behaviors
+        Abstract method in this baseclass
         """
-        w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 4], self.w_decay)
-        b = create_bias_var(self.cvn("BIAS", 'o', 0), [4])
-        out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
-        return out
+        raise NotImplementedError("ABSTRACT")
 
     def _create_branch(self, branch: str, prev_out: tf.Tensor) -> tf.Tensor:
         """
@@ -473,7 +476,7 @@ class ZfGpNetworkModel(NetworkModel):
             # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
             self._x_in = tf.placeholder(tf.float32, [None, 3, FRAME_RATE * HIST_SECONDS, 1], "x_in")
             # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
-            self._y_ = tf.placeholder(tf.float32, [None, 4], "y_")
+            self._y_ = self._create_real_out_placeholder()
             # data binning layer
             xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
             # the input convolution depends on the network structure: branched or fully mixed
@@ -709,6 +712,54 @@ class ZfGpNetworkModel(NetworkModel):
             layer_out = tensor.eval(fd, session=self._session)
         return layer_out
 
+    @property
+    def convolution_data(self):
+        """
+        The weights and biases of the convolution layer(s)
+        """
+        self._check_init()
+        with self._graph.as_default():
+            if 't' in self._branches:
+                to_get = ['t', 's', 'a']
+            else:
+                to_get = ['m']
+            g = self._session.graph
+            w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in to_get}
+            b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
+        return w, b
+
+
+class ZfGpNetworkModel(GpNetworkModel):
+    """
+    Class representing gradient prediction network models
+    """
+    def __init__(self):
+        """
+        Creates a new ZfGpNetworkModel
+        """
+        super().__init__()
+
+    # Private API
+    def _create_output(self, prev_out: tf.Tensor) -> tf.Tensor:
+        """
+        Creates the output layer for reporting predicted temperature of all four behaviors
+        :param prev_out: The output of the previous layer
+        :return: output
+        """
+        w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 4], self.w_decay)
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [4])
+        out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
+        return out
+
+    def _create_real_out_placeholder(self):
+        """
+        Creates placeholder variable for labels
+        :return:
+        """
+        # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
+        return tf.placeholder(tf.float32, [None, 4], "y_")
+
+    # Public API
     @staticmethod
     def plot_network(activations: dict, index: int):
         """
@@ -845,22 +896,6 @@ class ZfGpNetworkModel(NetworkModel):
             labelbottom='off',
             labelleft='off')
         return fig, ax
-
-    @property
-    def convolution_data(self):
-        """
-        The weights and biases of the convolution layer(s)
-        """
-        self._check_init()
-        with self._graph.as_default():
-            if 't' in self._branches:
-                to_get = ['t', 's', 'a']
-            else:
-                to_get = ['m']
-            g = self._session.graph
-            w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in to_get}
-            b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in to_get}
-        return w, b
 
 
 class SimpleRLNetwork(NetworkModel):
