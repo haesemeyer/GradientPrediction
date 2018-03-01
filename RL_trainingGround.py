@@ -6,7 +6,8 @@
 Script to train gradient reinforcement learning navigation model
 """
 
-from core import SimpleRLNetwork, TemperatureArena, FRAME_RATE, HIST_SECONDS
+from core import SimpleRLNetwork, FRAME_RATE, HIST_SECONDS
+from zf_simulators import TemperatureArena
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns

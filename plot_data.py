@@ -14,8 +14,8 @@ from scipy.stats import linregress
 import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
-from core import CircleGradSimulation, LinearGradientSimulation
-from core import ModelData, GradientData, ZfGpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation, PersistentStore
+from core import ModelData, GradientData, ZfGpNetworkModel, FRAME_RATE, ca_convolve, PersistentStore
+from zf_simulators import CircleGradSimulation, LinearGradientSimulation, WhiteNoiseSimulation
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame

@@ -13,8 +13,8 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, GradientData, ModelSimulation, ZfGpNetworkModel, CircleGradSimulation
-from core import LinearGradientSimulation
+from core import ModelData, GradientData, ZfGpNetworkModel
+from zf_simulators import ModelSimulation, CircleGradSimulation, LinearGradientSimulation
 
 
 def run_simulation(simulation: ModelSimulation, n_steps, run_ideal=False, simdir="r"):

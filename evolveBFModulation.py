@@ -8,7 +8,8 @@ to improve targeting of 26C in a gradient
 """
 
 import numpy as np
-from core import ModelData, GradientData, ZfGpNetworkModel, BoutFrequencyEvolver
+from core import ModelData, GradientData, ZfGpNetworkModel
+from zf_simulators import BoutFrequencyEvolver
 import os
 from time import perf_counter
 

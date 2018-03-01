@@ -7,7 +7,8 @@ Module to generate, save and load training and test data and provide access to t
 """
 
 import numpy as np
-from core import TrainingSimulation, GradientData
+from core import GradientData
+from zf_simulators import TrainingSimulation
 
 
 class CircGradientTrainer(TrainingSimulation):
