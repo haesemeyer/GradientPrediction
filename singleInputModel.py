@@ -21,7 +21,7 @@ if __name__ == "__main__":
     print("For each 'behavior' subpart attempt to learn different sums on standard normal distribution", flush=True)
     t_losses = []
     d_fracs = []
-    with core.GpNetworkModel() as model:
+    with core.ZfGpNetworkModel() as model:
         model.setup(N_CONV_LAYERS, 512, 2, 2)
         for i in range(2000):
             xb1 = np.random.randn(100, 1, core.FRAME_RATE * core.HIST_SECONDS, 1)

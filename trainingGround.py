@@ -6,7 +6,7 @@
 Script to train gradient navigation model
 """
 
-from core import GradientData, GpNetworkModel
+from core import GradientData, ZfGpNetworkModel
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns
@@ -37,7 +37,7 @@ else:
     chk_file = "./model_data/mixedInputModel.ckpt"
 
 
-def train_one(batch, net_model: GpNetworkModel):
+def train_one(batch, net_model: ZfGpNetworkModel):
     # save variables every 10000 steps but don't re-save model-meta
     if global_count != 0 and global_count % 50000 == 0:
         path = net_model.save_state(chk_file, global_count, False)
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     test_rank_errors = []
     global_count = 0
     total_steps = N_EPOCHS * (epoch_1_size + epoch_2_size)
-    with GpNetworkModel() as Model:
+    with ZfGpNetworkModel() as Model:
         Model.setup(N_CONV, N_UNITS, N_BRANCH, N_MIXED)
         # save naive model including full graph
         save_path = Model.save_state(chk_file, 0)

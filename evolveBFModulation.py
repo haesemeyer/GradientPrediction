@@ -8,7 +8,7 @@ to improve targeting of 26C in a gradient
 """
 
 import numpy as np
-from core import ModelData, GradientData, GpNetworkModel, BoutFrequencyEvolver
+from core import ModelData, GradientData, ZfGpNetworkModel, BoutFrequencyEvolver
 import os
 from time import perf_counter
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
         print("Performing evolution of {0} for {1} generations.".format(p, n_gen), flush=True)
         os.makedirs(savedir)
         mdata = ModelData(model_path)
-        gpn = GpNetworkModel()
+        gpn = ZfGpNetworkModel()
         gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
         bfe = BoutFrequencyEvolver(std, gpn)
         weights = np.full((n_gen, bfe.n_networks, bfe.n_weights), np.nan)

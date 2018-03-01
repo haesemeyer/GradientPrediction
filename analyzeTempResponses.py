@@ -15,7 +15,7 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, GpNetworkModel, GradientData, ca_convolve, FRAME_RATE
+from core import ModelData, ZfGpNetworkModel, GradientData, ca_convolve, FRAME_RATE
 import h5py
 from sklearn.manifold import SpectralEmbedding
 from sklearn.cluster import SpectralClustering
@@ -47,7 +47,7 @@ def get_cell_responses(temp, standards):
     mdata = ModelData(model_dir)
     root.update()
     # create our model and load from last checkpoint
-    gpn = GpNetworkModel()
+    gpn = ZfGpNetworkModel()
     gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     # prepend lead-in to stimulus
     lead_in = np.full(gpn.input_dims[2] - 1, np.mean(temp[:10]))

@@ -14,7 +14,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as pl
 import tkinter as tk
 from tkinter import filedialog
-from core import GradientData, FRAME_RATE, ModelData, GpNetworkModel
+from core import GradientData, FRAME_RATE, ModelData, ZfGpNetworkModel
 from trainingData import CircGradientTrainer
 
 
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     mdata = ModelData(model_dir)
     root.update()
     # create our model and load from last checkpoint
-    gpn = GpNetworkModel()
+    gpn = ZfGpNetworkModel()
     gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     # prepend lead-in to stimulus
     lead_in = np.full(gpn.input_dims[2] - 1, np.mean(temp[:10]))
@@ -59,6 +59,6 @@ if __name__ == "__main__":
     activities = gpn.unit_stimulus_responses(temp, spd, da, std)
     # make actual movie at five hertz, simply by skipping and also only create first repeat
     for i in range(activities['o'][0].shape[0] // 60):
-        fig, ax = GpNetworkModel.plot_network(activities, i*20)
+        fig, ax = ZfGpNetworkModel.plot_network(activities, i * 20)
         fig.savefig("./networkMovie/{0}.png".format(i), type="png", dpi=150)
         pl.close(fig)

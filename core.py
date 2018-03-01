@@ -337,13 +337,13 @@ class NetworkModel:
         return "{0}_{1}_{2}".format(vartype, branch, index)
 
 
-class GpNetworkModel(NetworkModel):
+class ZfGpNetworkModel(NetworkModel):
     """
     Class representing gradient prediction network models
     """
     def __init__(self):
         """
-        Creates a new GpNetworkModel
+        Creates a new ZfGpNetworkModel
         """
         super().__init__()
         # initialize fields that will be populated later
@@ -1660,7 +1660,7 @@ class ModelSimulation(TemperatureArena):
     Base class for simulations that use trained networks
     to perform gradient navigation
     """
-    def __init__(self, model: GpNetworkModel, tdata, t_preferred):
+    def __init__(self, model: ZfGpNetworkModel, tdata, t_preferred):
         """
         Creates a new ModelSimulation
         :param model: The network model to run the simulation
@@ -1856,7 +1856,7 @@ class CircleGradSimulation(ModelSimulation):
     """
     Implements a nn-Model based gradient navigation simulation
     """
-    def __init__(self, model: GpNetworkModel, tdata, radius, t_min, t_max, t_preferred=None):
+    def __init__(self, model: ZfGpNetworkModel, tdata, radius, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
         :param model: The network model to run the simulation
@@ -1900,7 +1900,7 @@ class LinearGradientSimulation(ModelSimulation):
     """
     Implements a nn-Model based linear gradient navigation simulation
     """
-    def __init__(self, model: GpNetworkModel, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
+    def __init__(self, model: ZfGpNetworkModel, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
         :param model: The network model to run the simulation
@@ -1947,7 +1947,7 @@ class WhiteNoiseSimulation(TemperatureArena):
     """
     Class to perform white noise analysis of network models
     """
-    def __init__(self, stds: GradientStandards, model: GpNetworkModel, base_freq=1.0, stim_mean=0.0, stim_std=1.0):
+    def __init__(self, stds: GradientStandards, model: ZfGpNetworkModel, base_freq=1.0, stim_mean=0.0, stim_std=1.0):
         """
         Creates a new WhiteNoiseSimulation object
         :param stds: Standardization for displacement used in model training
@@ -2112,10 +2112,10 @@ class WhiteNoiseSimulation(TemperatureArena):
 
 class BoutFrequencyEvolver(CircleGradSimulation):
     """
-    Class to obtain parameters that turn the output of the temperature branch of a GpNetworkModel into a bout frequency
+    Class to obtain parameters that turn the output of the temperature branch of a ZfGpNetworkModel into a bout frequency
     such that gradient navigation efficiency will be maximised by running an evolutionary algorithm
     """
-    def __init__(self, stds: GradientStandards, model: GpNetworkModel, n_sel_best=10, n_sel_random=6, n_progeny=2):
+    def __init__(self, stds: GradientStandards, model: ZfGpNetworkModel, n_sel_best=10, n_sel_random=6, n_progeny=2):
         """
         Creates a new BoutFrequencyEvolver
         :param stds: Data standardizations

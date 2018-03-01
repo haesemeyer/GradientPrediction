@@ -15,7 +15,7 @@ import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
 from core import CircleGradSimulation, LinearGradientSimulation
-from core import ModelData, GradientData, GpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation, PersistentStore
+from core import ModelData, GradientData, ZfGpNetworkModel, FRAME_RATE, ca_convolve, WhiteNoiseSimulation, PersistentStore
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame
@@ -102,7 +102,7 @@ class SimulationStore(ModelStore):
             chk = mdata.FirstCheckpoint
         else:
             chk = mdata.LastCheckpoint
-        gpn = GpNetworkModel()
+        gpn = ZfGpNetworkModel()
         gpn.load(mdata.ModelDefinition, chk)
         if sim_type == "r":
             sim = CircleGradSimulation(gpn, std, **circle_sim_params)
@@ -191,7 +191,7 @@ class ActivityStore(ModelStore):
         """
         global std
         mdata = ModelData(model_dir)
-        gpn_trained = GpNetworkModel()
+        gpn_trained = ZfGpNetworkModel()
         gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
         # prepend lead-in to stimulus
         lead_in = np.full(gpn_trained.input_dims[2] - 1, np.mean(temp[:10]))
@@ -834,7 +834,7 @@ if __name__ == "__main__":
     for p in paths_512:
         m_path = mpath(p)
         mdata_wn = ModelData(m_path)
-        gpn_wn = GpNetworkModel()
+        gpn_wn = ZfGpNetworkModel()
         gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
         wna = WhiteNoiseSimulation(std, gpn_wn, stim_std=2)
         wna.switch_mean = 5

@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, GradientData, ModelSimulation, GpNetworkModel, CircleGradSimulation
+from core import ModelData, GradientData, ModelSimulation, ZfGpNetworkModel, CircleGradSimulation
 from core import LinearGradientSimulation
 
 
@@ -78,9 +78,9 @@ if __name__ == "__main__":
     sim_type = ""
     while sim_type != "l" and sim_type != "r":
         sim_type = input("Please select either (l)inear or (r)adial simulation [l/r]:")
-    gpn_naive = GpNetworkModel()
+    gpn_naive = ZfGpNetworkModel()
     gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
-    gpn_trained = GpNetworkModel()
+    gpn_trained = ZfGpNetworkModel()
     gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     if sim_type == "l":
         sim_type = "x"  # so we call run_simulation correctly later
