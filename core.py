@@ -731,7 +731,7 @@ class GpNetworkModel(NetworkModel):
 
 class ZfGpNetworkModel(GpNetworkModel):
     """
-    Class representing gradient prediction network models
+    Class representing zebrafish gradient prediction network model
     """
     def __init__(self):
         """
@@ -896,6 +896,24 @@ class ZfGpNetworkModel(GpNetworkModel):
             labelbottom='off',
             labelleft='off')
         return fig, ax
+
+
+class CeGpNetworkModel(GpNetworkModel):
+    """
+    Class representing C elegans gradient prediction network model
+    """
+    def __init__(self):
+        """
+        Creates a new CeGpNetworkModel
+        """
+        super().__init__()
+
+    # Private API
+    def _create_real_out_placeholder(self):
+        raise NotImplementedError()
+
+    def _create_output(self, prev_out: tf.Tensor):
+        raise NotImplementedError()
 
 
 class SimpleRLNetwork(NetworkModel):
