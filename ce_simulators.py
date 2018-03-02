@@ -262,29 +262,31 @@ class TrainingSimulation(TemperatureArena):
             raise ValueError("sim_pos has to be nx3 array with xpos, ypos and heading at each timepoint")
         history = FRAME_RATE * HIST_SECONDS
         start = history + 1  # start data creation with enough history present
-        # initialize model inputs and outputs
-        inputs = np.zeros((sim_pos.shape[0] - start, 3, history), np.float32)
-        outputs = np.zeros((sim_pos.shape[0] - start, 5), np.float32)
         btypes = ["C", "S", "P", "L", "R"]
         # create vector that selects one position every second on average
         sel = np.random.rand(sim_pos.shape[0]) < (1/FRAME_RATE)
+        sel[:start+1] = False
+        # initialize model inputs and outputs
+        inputs = np.zeros((sel.sum(), 3, history), np.float32)
+        outputs = np.zeros((sel.sum(), 5), np.float32)
         # loop over each position, simulating PRED_WINDOW into future to obtain real finish temperature
+        curr_sel = 0
         for step in range(start, sim_pos.shape[0]):
             if not sel[step]:
                 continue
             # obtain inputs at given step
-            inputs[step-start, 0, :] = self.temperature(sim_pos[step-history+1:step+1, 0],
-                                                        sim_pos[step-history+1:step+1, 1])
+            inputs[curr_sel, 0, :] = self.temperature(sim_pos[step-history+1:step+1, 0],
+                                                      sim_pos[step-history+1:step+1, 1])
             spd = np.sqrt(np.sum(np.diff(sim_pos[step-history:step+1, 0:2], axis=0)**2, 1))
-            inputs[step-start, 1, :] = spd
-            inputs[step-start, 2, :] = np.diff(sim_pos[step-history:step+1, 2], axis=0)
+            inputs[curr_sel, 1, :] = spd
+            inputs[curr_sel, 2, :] = np.diff(sim_pos[step-history:step+1, 2], axis=0)
             # select each possible behavior in turn starting from this step and simulate
             # PRED_WINDOW steps into the future to obtain final temperature as output
             for i, b in enumerate(btypes):
                 fpos = self.sim_forward(PRED_WINDOW, sim_pos[step, :], b)[-1, :]
-                outputs[step-start, i] = self.temperature(fpos[0], fpos[1])
-        # create gradient data object on all non-moving positions
-        sel = sel[start:]
-        assert sel.size == inputs.shape[0]
-        return GradientData(inputs[sel, :, :], outputs[sel, :], PRED_WINDOW)
+                outputs[curr_sel, i] = self.temperature(fpos[0], fpos[1])
+            curr_sel += 1
+        assert not np.any(np.sum(inputs, (1, 2)) == 0)
+        assert not np.any(np.sum(outputs, 1) == 0)
+        return GradientData(inputs, outputs, PRED_WINDOW)
 
