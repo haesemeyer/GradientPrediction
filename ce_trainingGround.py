@@ -1,12 +1,12 @@
-#  Copyright 2017 Martin Haesemeyer. All rights reserved.
+#  Copyright 2018 Martin Haesemeyer. All rights reserved.
 #
 # Licensed under the MIT license
 
 """
-Script to train zebrafish gradient navigation model
+Script to train C elegans gradient navigation model
 """
 
-from core import GradientData, ZfGpNetworkModel
+from core import GradientData, CeGpNetworkModel
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns
@@ -28,16 +28,16 @@ if SEPARATE:
     N_BRANCH = 2
     N_MIXED = 3
     N_CONV = 40
-    chk_file = "./model_data/separateInputModel.ckpt"
+    chk_file = "./model_data/ce_separateInputModel.ckpt"
 else:
     N_UNITS = 512
     N_BRANCH = 0
     N_MIXED = 3
     N_CONV = 40
-    chk_file = "./model_data/mixedInputModel.ckpt"
+    chk_file = "./model_data/ce_mixedInputModel.ckpt"
 
 
-def train_one(batch, net_model: ZfGpNetworkModel):
+def train_one(batch, net_model: CeGpNetworkModel):
     # save variables every 10000 steps but don't re-save model-meta
     if global_count != 0 and global_count % 50000 == 0:
         path = net_model.save_state(chk_file, global_count, False)
@@ -80,10 +80,10 @@ def train_one(batch, net_model: ZfGpNetworkModel):
 
 
 if __name__ == "__main__":
-    trainingData_1 = GradientData.load("gd_training_data.hdf5")
-    trainingData_2 = GradientData.load("gd_training_data_rev.hdf5")
+    trainingData_1 = GradientData.load("ce_gd_training_data.hdf5")
+    trainingData_2 = GradientData.load("ce_gd_training_data_rev.hdf5")
     trainingData_2.copy_normalization(trainingData_1)
-    testData = GradientData.load("gd_test_data_radial.hdf5")
+    testData = GradientData.load("ce_gd_test_data_radial.hdf5")
     # enforce same scaling on testData as on trainingData
     testData.copy_normalization(trainingData_1)
     epoch_1_size = trainingData_1.data_size // BATCHSIZE
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     test_rank_errors = []
     global_count = 0
     total_steps = N_EPOCHS * (epoch_1_size + epoch_2_size)
-    with ZfGpNetworkModel() as Model:
+    with CeGpNetworkModel() as Model:
         Model.setup(N_CONV, N_UNITS, N_BRANCH, N_MIXED)
         # save naive model including full graph
         save_path = Model.save_state(chk_file, 0)
