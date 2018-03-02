@@ -4,6 +4,8 @@
 
 """
 Classes for zebrafish behavior simulations
+Behavioral distributions are derived from aggregated data across behavioral experiments in (Haesemeyer, 2015)
+Note that behavior is merely approximated as the goal is not to derive a realistic simulation of zebrafish behavior
 """
 
 import numpy as np
