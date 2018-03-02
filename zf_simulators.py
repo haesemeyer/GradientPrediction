@@ -9,8 +9,11 @@ Note that behavior is merely approximated as the goal is not to derive a realist
 """
 
 import numpy as np
-from core import FRAME_RATE, HIST_SECONDS, PRED_WINDOW
+from core import FRAME_RATE, HIST_SECONDS
 from core import RandCash, GradientData, GradientStandards, ZfGpNetworkModel, indexing_matrix
+
+
+PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 500 ms into the future
 
 
 class TemperatureArena:
@@ -201,7 +204,7 @@ class TrainingSimulation(TemperatureArena):
         # create gradient data object on all non-moving positions
         is_moving = is_moving[start:]
         assert is_moving.size == inputs.shape[0]
-        return GradientData(inputs[np.logical_not(is_moving), :, :], outputs[np.logical_not(is_moving), :])
+        return GradientData(inputs[np.logical_not(is_moving), :, :], outputs[np.logical_not(is_moving), :], PRED_WINDOW)
 
 
 class ModelSimulation(TemperatureArena):

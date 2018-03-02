@@ -140,5 +140,5 @@ if __name__ == '__main__':
         grad_data = gradsim.create_dataset(pos)
         all_in = np.r_[all_in, grad_data.model_in_raw]
         all_out = np.r_[all_out, grad_data.model_out_raw]
-        grad_data = GradientData(all_in, all_out)
+        grad_data = GradientData(all_in, all_out, grad_data.pred_window)
         print("Done")

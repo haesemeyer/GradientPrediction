@@ -19,7 +19,6 @@ import seaborn as sns
 FRAME_RATE = 100  # all simulations, training data models have a native framerate of 100 Hz
 HIST_SECONDS = 4  # all inputs to the models are 4s into the past
 MODEL_RATE = 5    # model input rate is 5 Hz
-PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 500 ms into the future
 
 
 # Functions
@@ -1353,7 +1352,7 @@ class GradientData:
     """
     Class that represents training/test data from a gradient experiment
     """
-    def __init__(self, model_in, model_out, pred_window=PRED_WINDOW, frame_rate=FRAME_RATE, hist_seconds=HIST_SECONDS):
+    def __init__(self, model_in, model_out, pred_window, frame_rate=FRAME_RATE, hist_seconds=HIST_SECONDS):
         """
         Creates a new GradientData object
         :param model_in: The input data for training
