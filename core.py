@@ -753,7 +753,6 @@ class ZfGpNetworkModel(GpNetworkModel):
     def _create_real_out_placeholder(self):
         """
         Creates placeholder variable for labels
-        :return:
         """
         # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
         return tf.placeholder(tf.float32, [None, 4], "y_")
@@ -909,10 +908,22 @@ class CeGpNetworkModel(GpNetworkModel):
 
     # Private API
     def _create_real_out_placeholder(self):
-        raise NotImplementedError()
+        """
+        Creates placeholder variable for labels
+        """
+        # real outputs: BATCHSIZE x (dT(Continue), dT(StrongTurn), dt(Pirouette), dT(LeftTurn), dT(RightTurn))
+        return tf.placeholder(tf.float32, [None, 5], "y_")
 
     def _create_output(self, prev_out: tf.Tensor):
-        raise NotImplementedError()
+        """
+        Creates the output layer for reporting predicted temperature of all five behaviors
+        :param prev_out: The output of the previous layer
+        :return: output
+        """
+        w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 5], self.w_decay)
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [5])
+        out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
+        return out
 
 
 class SimpleRLNetwork(NetworkModel):
