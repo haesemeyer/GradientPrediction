@@ -70,7 +70,7 @@ class TemperatureArena:
         self._sharp_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_sharp + self.mu_sharp)
         self._pir_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_pir + self.mu_pir)
         self._shallow_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_shallow + self.mu_shallow)
-        self._jitter_cash = RandCash(1000, lambda s: np.random.rand(s) * self.sd_jitter + self.mu_jitter)
+        self._jitter_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_jitter + self.mu_jitter)
         # set up cash for left-right and movement deciders
         self._decider = RandCash(1000, lambda s: np.random.rand(s))
         # place holder to receive action trajectories for efficiency
@@ -115,10 +115,11 @@ class TemperatureArena:
             else:
                 da = turn_mult*self._sharp_cash.next_rand()
         elif action_type == "P":
+            turn_mult = 1 if self._decider.next_rand() < 0.5 else -1
             if expected:
-                da = self.mu_pir
+                da = turn_mult*self.mu_pir
             else:
-                da = self._pir_cash.next_rand()
+                da = turn_mult*self._pir_cash.next_rand()
         elif action_type == "L":
             if expected:
                 da = -self.mu_shallow
@@ -189,11 +190,21 @@ class TemperatureArena:
             # check for out of bounds and re-orient if necessary
             if self.out_of_bounds(all_pos[i - 1, 0], all_pos[i - 1, 1]):
                 center_x, center_y = self.arena_center()
-                # adjust current heading such that worm faces center of arena
+                # adjust current heading such that worm faces center of arena - but update such that we don't
+                # totally reset the already accumulated heading angle
                 dx = all_pos[i - 1, 0] - center_x
                 dy = all_pos[i - 1, 1] - center_y
                 a = np.arctan2(dy, dx)
-                all_pos[i - 1, 2] = a - np.pi
+                curr_ang = all_pos[i - 1, 2]
+                new_heading = np.arctan2(np.sin(a-np.pi), np.cos(a-np.pi))
+                # if we are already facing roughly in the same direction don't do anything - only act
+                # if we are facing away from center by at least 0.15 radians
+                d_angle = np.abs(new_heading - np.arctan2(np.sin(curr_ang), np.cos(curr_ang)))
+                if d_angle > 0.15:
+                    print("d_angle = {0}".format(d_angle))
+                    tau_count = curr_ang // (2*np.pi)
+                    all_pos[i - 1, 2] = new_heading + tau_count * 2 * np.pi
+                    print(all_pos[i - 1, 2] - all_pos[i - 2, 2])
             dec = self._decider.next_rand()
             if dec < self.p_move:
                 at = self.get_action_type()
