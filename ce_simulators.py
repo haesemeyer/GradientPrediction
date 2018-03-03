@@ -310,3 +310,321 @@ class TrainingSimulation(TemperatureArena):
         assert not np.any(np.sum(outputs, 1) == 0)
         return GradientData(inputs, outputs, PRED_WINDOW)
 
+
+class ModelSimulation(TemperatureArena):
+    """
+    Base class for simulations that use trained networks
+    to perform gradient navigation
+    """
+    def __init__(self, model: CeGpNetworkModel, tdata, t_preferred):
+        """
+        Creates a new ModelSimulation
+        :param model: The network model to run the simulation
+        :param tdata: Training data or related object to supply scaling information
+        :param t_preferred: The preferred temperature that should be reached during the simulation
+        """
+        super().__init__()
+        self.model = model
+        self.t_preferred = t_preferred
+        self.temp_mean = tdata.temp_mean
+        self.temp_std = tdata.temp_std
+        self.disp_mean = tdata.disp_mean
+        self.disp_std = tdata.disp_std
+        self.ang_mean = tdata.ang_mean
+        self.ang_std = tdata.ang_std
+        self.btypes = ["C", "S", "P", "L", "R"]
+        # all starting positions have to be within bounds but x and y coordinates are further limted to +/- maxstart
+        self.maxstart = 10
+        # optionally holds a list of vectors to suppress activation in units that should be "ablated"
+        self.remove = None
+
+    def temperature(self, x, y):
+        """
+        Returns the temperature at the given positions
+        """
+        raise NotImplementedError("ABSTRACT")
+
+    def arena_center(self):
+        """
+        Returns the x and y coordinates of the arena center
+        """
+        raise NotImplementedError("ABSTRACT")
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        raise NotImplementedError("ABSTRACT")
+
+    @property
+    def max_pos(self):
+        raise NotImplementedError("ABSTRACT")
+
+    def get_start_pos(self):
+        x = np.inf
+        y = np.inf
+        while self.out_of_bounds(x, y):
+            x = np.random.randint(-self.maxstart, self.maxstart, 1)
+            y = np.random.randint(-self.maxstart, self.maxstart, 1)
+        a = np.random.rand() * 2 * np.pi
+        return np.array([x, y, a])
+
+    def select_behavior(self, ranks):
+        """
+        Given a ranking of choices returns the action type identifier to perform
+        """
+        decider = self._decider.next_rand()
+        if decider < 0.5:
+            return self.btypes[ranks[0]]
+        elif decider < 0.7:
+            return self.btypes[ranks[1]]
+        elif decider < 0.8:
+            return self.btypes[ranks[2]]
+        elif decider < 0.9:
+            return self.btypes[ranks[3]]
+        else:
+            return self.btypes[ranks[4]]
+
+    def run_simulation(self, nsteps, debug=False):
+        """
+        Runs gradient simulation using the neural network model
+        :param nsteps: The number of timesteps to perform
+        :param debug: If set to true function will return debug output
+        :return:
+            [0] nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
+            [1] Returned if debug=True. Dictionary with vector of temps and matrix of predictions at each position
+        """
+        debug_dict = {}
+        t_out = np.zeros(5)  # for debug purposes to run true outcome simulations forward
+        if debug:
+            # debug dict only contains information for timesteps which were select for possible movement!
+            debug_dict["curr_temp"] = np.full(nsteps, np.nan)  # the current temperature at this position
+            debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)  # the network predicted temperature for each move
+            debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")  # the actually selected move
+            debug_dict["true_temp"] = np.full((nsteps, 4), np.nan)  # the temperature if each move is simulated
+        history = FRAME_RATE * HIST_SECONDS
+        burn_period = history * 2
+        start = history + 1
+        pos = np.full((nsteps + burn_period, 3), np.nan)
+        pos[:start + 1, :] = self.get_start_pos()[None, :]
+        # run simulation
+        step = start
+        model_in = np.zeros((1, 3, history, 1))
+        p_eval = self.p_move
+        while step < nsteps + burn_period:
+            # check for out of bounds and re-orient if necessary
+            if self.out_of_bounds(pos[step - 1, 0], pos[step - 1, 1]):
+                pos[step - 1, 2] = self.adjust_oob_heading(pos[step - 1, :])
+            if self._decider.next_rand() > p_eval:
+                cx, cy, ca = pos[step - 1, :]
+                disp = self._disp_cash.next_rand()
+                cx += disp * np.cos(ca)
+                cy += disp * np.sin(ca)
+                ca += self._jitter_cash.next_rand()
+                pos[step, 0] = cx
+                pos[step, 1] = cy
+                pos[step, 2] = ca
+                step += 1
+                continue
+            model_in[0, 0, :, 0] = (self.temperature(pos[step - history:step, 0], pos[step - history:step, 1])
+                                    - self.temp_mean) / self.temp_std
+            spd = np.sqrt(np.sum(np.diff(pos[step - history - 1:step, 0:2], axis=0) ** 2, 1))
+            model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
+            dang = np.diff(pos[step - history - 1:step, 2], axis=0)
+            model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
+            model_out = self.model.predict(model_in, 1.0, self.remove).ravel()
+            if self.t_preferred is None:
+                # to favor behavior towards center put action that results in lowest temperature first
+                behav_ranks = np.argsort(model_out)
+            else:
+                proj_diff = np.abs(model_out - (self.t_preferred - self.temp_mean)/self.temp_std)
+                behav_ranks = np.argsort(proj_diff)
+            bt = self.select_behavior(behav_ranks)
+            if debug:
+                dbpos = step - burn_period
+                debug_dict["curr_temp"][dbpos] = model_in[0, 0, -1, 0] * self.temp_std + self.temp_mean
+                debug_dict["pred_temp"][dbpos, :] = model_out * self.temp_std + self.temp_mean
+                debug_dict["sel_behav"][dbpos] = bt
+                for i, b in enumerate(self.btypes):
+                    fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                    t_out[i] = self.temperature(fpos[0], fpos[1])
+                debug_dict["true_temp"][dbpos, :] = t_out
+            if bt == "C":
+                cx, cy, ca = pos[step - 1, :]
+                disp = self._disp_cash.next_rand()
+                cx += disp * np.cos(ca)
+                cy += disp * np.sin(ca)
+                ca += self._jitter_cash.next_rand()
+                pos[step, 0] = cx
+                pos[step, 1] = cy
+                pos[step, 2] = ca
+                step += 1
+                continue
+            traj = self.get_action_trajectory(pos[step-1, :], bt)
+            if step + self.alen <= nsteps + burn_period:
+                pos[step:step + self.alen, :] = traj
+            else:
+                pos[step:, :] = traj[:pos[step:, :].shape[0], :]
+            step += self.alen
+        if debug:
+            return pos[burn_period:, :], debug_dict
+        return pos[burn_period:, :]
+
+    def run_ideal(self, nsteps, pfail=0.0):
+        """
+        Runs gradient simulation picking the move that is truly ideal on average at each point
+        :param nsteps: The number of timesteps to perform
+        :param pfail: Probability of randomizing the order of behaviors instead of picking ideal
+        :return: nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
+        """
+        history = FRAME_RATE * HIST_SECONDS
+        burn_period = history * 2
+        start = history + 1
+        pos = np.full((nsteps + burn_period, 3), np.nan)
+        pos[:start + 1, :] = self.get_start_pos()[None, :]
+        step = start
+        # overall bout frequency at ~1 Hz
+        p_eval = self.p_move
+        t_out = np.zeros(4)
+        while step < nsteps + burn_period:
+            if self._decider.next_rand() > p_eval:
+                cx, cy, ca = pos[step - 1, :]
+                disp = self._disp_cash.next_rand()
+                cx += disp * np.cos(ca)
+                cy += disp * np.sin(ca)
+                ca += self._jitter_cash.next_rand()
+                pos[step, 0] = cx
+                pos[step, 1] = cy
+                pos[step, 2] = ca
+                step += 1
+                continue
+            for i, b in enumerate(self.btypes):
+                fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                t_out[i] = self.temperature(fpos[0], fpos[1])
+            if self.t_preferred is None:
+                # to favor behavior towards center put action that results in lowest temperature first
+                behav_ranks = np.argsort(t_out).ravel()
+            else:
+                proj_diff = np.abs(t_out - self.t_preferred)
+                behav_ranks = np.argsort(proj_diff).ravel()
+            if self._decider.next_rand() < pfail:
+                np.random.shuffle(behav_ranks)
+            bt = self.select_behavior(behav_ranks)
+            if bt == "C":
+                cx, cy, ca = pos[step - 1, :]
+                disp = self._disp_cash.next_rand()
+                cx += disp * np.cos(ca)
+                cy += disp * np.sin(ca)
+                ca += self._jitter_cash.next_rand()
+                pos[step, 0] = cx
+                pos[step, 1] = cy
+                pos[step, 2] = ca
+                step += 1
+                continue
+            traj = self.get_action_trajectory(pos[step - 1, :], bt)
+            if step + self.alen <= nsteps + burn_period:
+                pos[step:step + self.alen, :] = traj
+            else:
+                pos[step:, :] = traj[:pos[step:, :].shape[0], :]
+            step += self.alen
+        return pos[burn_period:, :]
+
+
+class CircleGradSimulation(ModelSimulation):
+    """
+    Implements a nn-Model based circular gradient navigation simulation
+    """
+    def __init__(self, model: CeGpNetworkModel, tdata, radius, t_min, t_max, t_preferred=None):
+        """
+        Creates a new ModelGradSimulation
+        :param model: The network model to run the simulation
+        :param tdata: Object that cotains training normalizations of model inputs
+        :param radius: The arena radius
+        :param t_min: The center temperature
+        :param t_max: The edge temperature
+        :param t_preferred: The preferred temperature or None to prefer minimum
+        """
+        super().__init__(model, tdata, t_preferred)
+        self.radius = radius
+        self.t_min = t_min
+        self.t_max = t_max
+        # set range of starting positions to more sensible default
+        self.maxstart = self.radius
+
+    def temperature(self, x, y):
+        """
+        Returns the temperature at the given positions
+        """
+        r = np.sqrt(x**2 + y**2)  # this is a circular arena so compute radius
+        return (r / self.radius) * (self.t_max - self.t_min) + self.t_min
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        # circular arena, compute radial position of point and compare to arena radius
+        r = np.sqrt(x**2 + y**2)
+        return r > self.radius
+
+    def arena_center(self):
+        return 0, 0
+
+    @property
+    def max_pos(self):
+        return self.radius
+
+
+class LinearGradientSimulation(ModelSimulation):
+    """
+    Implements a nn-Model based linear gradient navigation simulation
+    """
+    def __init__(self, model: CeGpNetworkModel, tdata, xmax, ymax, t_min, t_max, t_preferred=None):
+        """
+        Creates a new ModelGradSimulation
+        :param model: The network model to run the simulation
+        :param tdata: Object that cotains training normalizations of model inputs
+        :param xmax: The maximum x-position (gradient direction)
+        :param ymax: The maximum y-position (neutral direction)
+        :param t_min: The x=0 temperature
+        :param t_max: The x=xmax temperature
+        :param t_preferred: The preferred temperature or None to prefer minimum
+        """
+        super().__init__(model, tdata, t_preferred)
+        self.xmax = xmax
+        self.ymax = ymax
+        self.t_min = t_min
+        self.t_max = t_max
+        # set range of starting positions to more sensible default
+        self.maxstart = max(self.xmax, self.ymax)
+
+    def temperature(self, x, y):
+        """
+        Returns the temperature at the given positions
+        """
+        return (x / self.xmax) * (self.t_max - self.t_min) + self.t_min
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        if x < 0 or x > self.xmax:
+            return True
+        if y < 0 or y > self.ymax:
+            return True
+        return False
+
+    def arena_center(self):
+        return self.xmax / 2, self.ymax / 2
+
+    @property
+    def max_pos(self):
+        return self.xmax
