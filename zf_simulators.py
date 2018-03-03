@@ -29,7 +29,7 @@ class TemperatureArena:
         # Displacement is drawn from gamma distribution
         self.disp_k = 2.63
         self.disp_theta = 1 / 0.138
-        self.avg_disp = self.disp_k * self.disp_theta
+        self.avg_disp = self.disp_k * self.disp_theta  # NOTE: This is not adjusted to mm - expected moves are exagg.
         # Turn angles of straight swims and turns are drawn from gaussian
         self.mu_str = np.deg2rad(0)
         self.sd_str = np.deg2rad(2)
