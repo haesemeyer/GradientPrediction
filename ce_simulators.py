@@ -98,6 +98,30 @@ class TemperatureArena:
         """
         raise NotImplementedError("ABSTRACT")
 
+    def adjust_oob_heading(self, p: np.ndarray) -> float:
+        """
+        Returns a heading given a 3-element position vector that will make the worm face the arena center
+        with minimal angular displacement
+        :param p: The out-of-bounds position
+        :return: New suggested heading
+        """
+        center_x, center_y = self.arena_center()
+        # adjust current heading such that worm faces center of arena - but update such that we don't
+        # totally reset the already accumulated heading angle
+        dx = p[0] - center_x
+        dy = p[1] - center_y
+        a = np.arctan2(dy, dx)
+        curr_ang = p[2]
+        new_heading = np.arctan2(np.sin(a - np.pi), np.cos(a - np.pi))
+        # if we are already facing roughly in the same direction don't do anything - only act
+        # if we are facing away from center by at least 0.15 radians
+        d_angle = np.abs(new_heading - np.arctan2(np.sin(curr_ang), np.cos(curr_ang)))
+        if d_angle > 0.15:
+            tau_count = curr_ang // (2 * np.pi)
+            return new_heading + tau_count * 2 * np.pi
+        else:
+            return curr_ang
+
     def get_action_trajectory(self, start, action_type="S", expected=False):
         """
         Gets a trajectory for the given bout type
@@ -189,22 +213,7 @@ class TemperatureArena:
         while i < nsteps:
             # check for out of bounds and re-orient if necessary
             if self.out_of_bounds(all_pos[i - 1, 0], all_pos[i - 1, 1]):
-                center_x, center_y = self.arena_center()
-                # adjust current heading such that worm faces center of arena - but update such that we don't
-                # totally reset the already accumulated heading angle
-                dx = all_pos[i - 1, 0] - center_x
-                dy = all_pos[i - 1, 1] - center_y
-                a = np.arctan2(dy, dx)
-                curr_ang = all_pos[i - 1, 2]
-                new_heading = np.arctan2(np.sin(a-np.pi), np.cos(a-np.pi))
-                # if we are already facing roughly in the same direction don't do anything - only act
-                # if we are facing away from center by at least 0.15 radians
-                d_angle = np.abs(new_heading - np.arctan2(np.sin(curr_ang), np.cos(curr_ang)))
-                if d_angle > 0.15:
-                    print("d_angle = {0}".format(d_angle))
-                    tau_count = curr_ang // (2*np.pi)
-                    all_pos[i - 1, 2] = new_heading + tau_count * 2 * np.pi
-                    print(all_pos[i - 1, 2] - all_pos[i - 2, 2])
+                all_pos[i - 1, 2] = self.adjust_oob_heading(all_pos[i - 1, :])
             dec = self._decider.next_rand()
             if dec < self.p_move:
                 at = self.get_action_type()
