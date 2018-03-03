@@ -13,7 +13,7 @@ from core import FRAME_RATE, HIST_SECONDS
 from core import RandCash, GradientData, GradientStandards, ZfGpNetworkModel, indexing_matrix
 
 
-PRED_WINDOW = int(FRAME_RATE * 2)  # the model should predict the temperature 2 s into the future
+PRED_WINDOW = int(FRAME_RATE * 4)  # the model should predict the temperature 4 s into the future
 
 # Run-speed: 16 +/- 2 mm/min
 # Model as appropriately per-step scaled gaussian: ~ N(16 mm/min, 2 mm/min)
