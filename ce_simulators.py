@@ -49,12 +49,9 @@ class TemperatureArena:
         # Set bout parameters used in the simulation
         self.p_move = 0.1 / FRAME_RATE  # Pick action on average once every 10s
         self.alen = int(FRAME_RATE)  # Actions happen over 1 s length
-        # Per-frame displacement is drawn from gamma distribution
-        mu = 16 / (60*FRAME_RATE)
-        var = 4 / (60*FRAME_RATE)
-        self.mu_disp = mu
-        self.disp_theta = var / mu
-        self.disp_k = mu**2 / var
+        # Per-frame displacement is drawn from normal distribution
+        self.mu_disp = 16 / (60*FRAME_RATE)
+        self.sd_disp = 5.3 / (60*FRAME_RATE)
         # Sharp turn, pirouette and shallow turn angles are drawn from gaussians
         self.mu_sharp = np.deg2rad(45)
         self.sd_sharp = np.deg2rad(5)
@@ -66,7 +63,7 @@ class TemperatureArena:
         self.mu_jitter = 0
         self.sd_jitter = np.deg2rad(.1 / np.sqrt(FRAME_RATE))
         # set up cashes of random numbers for movement parameters
-        self._disp_cash = RandCash(1000, lambda s: np.random.gamma(self.disp_k, self.disp_theta, s))
+        self._disp_cash = RandCash(1000, lambda s: np.abs(np.random.randn(s) * self.sd_disp + self.mu_disp))
         self._sharp_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_sharp + self.mu_sharp)
         self._pir_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_pir + self.mu_pir)
         self._shallow_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_shallow + self.mu_shallow)
