@@ -10,10 +10,10 @@ Note that behavior is merely approximated as the goal is not to derive a realist
 
 import numpy as np
 from core import FRAME_RATE, HIST_SECONDS
-from core import RandCash, GradientData, GradientStandards, ZfGpNetworkModel, indexing_matrix
+from core import RandCash, GradientData, GradientStandards, CeGpNetworkModel, indexing_matrix
 
 
-PRED_WINDOW = int(FRAME_RATE * 4)  # the model should predict the temperature 4 s into the future
+PRED_WINDOW = int(FRAME_RATE * 60)  # the model should predict the temperature 1 minute into the future
 
 # Run-speed: 16 +/- 2 mm/min
 # Model as appropriately per-step scaled gaussian: ~ N(16 mm/min, 2 mm/min)
@@ -301,9 +301,12 @@ class TrainingSimulation(TemperatureArena):
             inputs[curr_sel, 1, :] = spd
             inputs[curr_sel, 2, :] = np.diff(sim_pos[step-history:step+1, 2], axis=0)
             # select each possible behavior in turn starting from this step and simulate
-            # PRED_WINDOW steps into the future to obtain final temperature as output
+            # the behavior into the future and obtain final temperature as output by
+            # approximating PRED_WINDOW steps into the future moving in a straight line
             for i, b in enumerate(btypes):
-                fpos = self.sim_forward(PRED_WINDOW, sim_pos[step, :], b)[-1, :]
+                fpos = self.sim_forward(self.alen, sim_pos[step, :], b)[-1, :]
+                fpos[0] += np.cos(fpos[2]) * PRED_WINDOW * self.mu_disp
+                fpos[1] += np.sin(fpos[2]) * PRED_WINDOW * self.mu_disp
                 outputs[curr_sel, i] = self.temperature(fpos[0], fpos[1])
             curr_sel += 1
         assert not np.any(np.sum(inputs, (1, 2)) == 0)
