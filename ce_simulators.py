@@ -502,7 +502,9 @@ class ModelSimulation(TemperatureArena):
                 step += 1
                 continue
             for i, b in enumerate(self.btypes):
-                fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                fpos = self.sim_forward(self.alen, pos[step-1, :], b)[-1, :]
+                fpos[0] += np.cos(fpos[2]) * PRED_WINDOW * self.mu_disp
+                fpos[1] += np.sin(fpos[2]) * PRED_WINDOW * self.mu_disp
                 t_out[i] = self.temperature(fpos[0], fpos[1])
             if self.t_preferred is None:
                 # to favor behavior towards center put action that results in lowest temperature first
