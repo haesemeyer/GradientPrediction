@@ -488,7 +488,7 @@ class ModelSimulation(TemperatureArena):
         step = start
         # overall bout frequency at ~1 Hz
         p_eval = self.p_move
-        t_out = np.zeros(4)
+        t_out = np.zeros(5)
         while step < nsteps + burn_period:
             if self._decider.next_rand() > p_eval:
                 cx, cy, ca = pos[step - 1, :]
