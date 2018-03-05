@@ -10,7 +10,8 @@ from core import PersistentStore, ModelData, GradientStandards
 import pickle
 import numpy as np
 from hashlib import md5
-from global_defs import GlobalDefs, MoTypes
+from global_defs import GlobalDefs
+from mo_types import MoTypes
 
 
 class ModelStore(PersistentStore):

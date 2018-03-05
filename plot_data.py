@@ -19,7 +19,8 @@ from zf_simulators import WhiteNoiseSimulation
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame
-from global_defs import GlobalDefs, MoTypes
+from global_defs import GlobalDefs
+from mo_types import MoTypes
 from data_stores import SimulationStore, ActivityStore
 
 
