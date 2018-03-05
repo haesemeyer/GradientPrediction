@@ -9,6 +9,7 @@ temperature variables on which convolution filters operate jointly
 
 import core
 import numpy as np
+from global_defs import GlobalDefs
 
 
 if __name__ == "__main__":
@@ -23,7 +24,7 @@ if __name__ == "__main__":
     with core.ZfGpNetworkModel() as model:
         model.setup(N_CONV_LAYERS, 512, 0, 3)
         for i in range(2000):
-            xb1 = np.random.randn(100, 1, core.FRAME_RATE * core.HIST_SECONDS, 1)
+            xb1 = np.random.randn(100, 1, GlobalDefs.frame_rate * GlobalDefs.hist_seconds, 1)
             xb2 = xb1 ** 2
             xb2 -= 1  # expected average of xb1**2
             xb3 = xb1 ** 3

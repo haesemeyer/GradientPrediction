@@ -14,7 +14,7 @@ from scipy.stats import linregress
 import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
-from core import ModelData, GradientData, ZfGpNetworkModel, FRAME_RATE, ca_convolve
+from core import ModelData, GradientData, ZfGpNetworkModel, ca_convolve
 from zf_simulators import WhiteNoiseSimulation
 from analyzeTempResponses import trial_average, cluster_responses
 import os
@@ -511,7 +511,7 @@ def compute_gradient_bout_frequency(model_path, drop_list=None):
         bcenters = bins[:-1] + np.diff(bins)/2
         cnt_r = np.histogram(r, bins)[0]
         cnt_r_bs = np.histogram(r[bs > 0.1], bins)[0]
-        bfreq = cnt_r_bs / cnt_r * FRAME_RATE
+        bfreq = cnt_r_bs / cnt_r * GlobalDefs.frame_rate
         return bfreq, bcenters
 
     with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
@@ -538,7 +538,7 @@ if __name__ == "__main__":
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
     x = np.arange(tsin.size)  # stored at 20 Hz !
-    xinterp = np.linspace(0, tsin.size, tsin.size * FRAME_RATE // 20)
+    xinterp = np.linspace(0, tsin.size, tsin.size * GlobalDefs.frame_rate // 20)
     temperature = np.interp(xinterp, x, tsin)
     dfile.close()
     # for our 512 unit network extract all temperature responses and correponding IDs
@@ -554,10 +554,10 @@ if __name__ == "__main__":
     # convolve all activity with the MTA derived nuclear Gcamp6s calcium kernel
     # we want to put network activity "on same footing" as imaging data
     tau_on = 1.4  # seconds
-    tau_on *= FRAME_RATE  # in frames
+    tau_on *= GlobalDefs.frame_rate  # in frames
     tau_off = 2  # seconds
-    tau_off *= FRAME_RATE  # in frames
-    kframes = np.arange(10 * FRAME_RATE)  # 10 s long kernel
+    tau_off *= GlobalDefs.frame_rate  # in frames
+    kframes = np.arange(10 * GlobalDefs.frame_rate)  # 10 s long kernel
     kernel = 2**(-kframes / tau_off) * (1 - 2**(-kframes / tau_on))
     kernel = kernel / kernel.sum()
     # convolve with our kernel
@@ -600,7 +600,7 @@ if __name__ == "__main__":
     for i in range(n_regs):
         ax.scatter(coords[clust_ids == i, 0], coords[clust_ids == i, 1], coords[clust_ids == i, 2], s=5)
     fig, (ax_on, ax_off) = pl.subplots(ncols=2)
-    time = np.arange(all_cells.shape[0]) / FRAME_RATE
+    time = np.arange(all_cells.shape[0]) / GlobalDefs.frame_rate
     for i in range(n_regs):
         act = cluster_acts[:, i]
         if np.corrcoef(act, temperature[:act.size])[0, 1] < 0:

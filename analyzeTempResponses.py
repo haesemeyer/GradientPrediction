@@ -15,10 +15,11 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, ZfGpNetworkModel, GradientData, ca_convolve, FRAME_RATE
+from core import ModelData, ZfGpNetworkModel, GradientData, ca_convolve
 import h5py
 from sklearn.manifold import SpectralEmbedding
 from sklearn.cluster import SpectralClustering
+from global_defs import GlobalDefs
 
 
 def trial_average(mat, n_trials):
@@ -109,13 +110,13 @@ if __name__ == "__main__":
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
     x = np.arange(tsin.size)  # stored at 20 Hz !
-    xinterp = np.linspace(0, tsin.size, tsin.size * FRAME_RATE // 20)
+    xinterp = np.linspace(0, tsin.size, tsin.size * GlobalDefs.frame_rate // 20)
     temp = np.interp(xinterp, x, tsin)
     dfile.close()
     all_cells = get_cell_responses(temp, std)
     # convolve with 3s calcium kernel
     for i in range(all_cells.shape[1]):
-        all_cells[:, i] = ca_convolve(all_cells[:, i], 3.0, FRAME_RATE)
+        all_cells[:, i] = ca_convolve(all_cells[:, i], 3.0, GlobalDefs.frame_rate)
     n_regs = 8
     clust_ids, coords = cluster_responses(all_cells, n_regs)
     # trial average the "cells"
@@ -127,7 +128,7 @@ if __name__ == "__main__":
         ax.scatter(coords[clust_ids == i, 0], coords[clust_ids == i, 1], coords[clust_ids == i, 2], s=5)
 
     fig, (ax_on, ax_off) = pl.subplots(ncols=2)
-    time = np.arange(all_cells.shape[0]) / FRAME_RATE
+    time = np.arange(all_cells.shape[0]) / GlobalDefs.frame_rate
     for i in range(n_regs):
         act = np.mean(all_cells[:, clust_ids == i], 1)
         if np.corrcoef(act, temp[:act.size])[0, 1] < 0:

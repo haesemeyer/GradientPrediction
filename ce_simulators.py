@@ -9,11 +9,11 @@ Note that behavior is merely approximated as the goal is not to derive a realist
 """
 
 import numpy as np
-from core import FRAME_RATE, HIST_SECONDS
-from core import RandCash, GradientData, GradientStandards, CeGpNetworkModel, indexing_matrix
+from core import RandCash, GradientData, CeGpNetworkModel
+from global_defs import GlobalDefs
 
 
-PRED_WINDOW = int(FRAME_RATE * 60)  # the model should predict the temperature 1 minute into the future
+PRED_WINDOW = int(GlobalDefs.frame_rate * 60)  # the model should predict the temperature 1 minute into the future
 
 # Run-speed: 16 +/- 2 mm/min
 # Model as appropriately per-step scaled gaussian: ~ N(16 mm/min, 2 mm/min)
@@ -47,11 +47,11 @@ class TemperatureArena:
     """
     def __init__(self):
         # Set bout parameters used in the simulation
-        self.p_move = 0.1 / FRAME_RATE  # Pick action on average once every 10s
-        self.alen = int(FRAME_RATE)  # Actions happen over 1 s length
+        self.p_move = 0.1 / GlobalDefs.frame_rate  # Pick action on average once every 10s
+        self.alen = int(GlobalDefs.frame_rate)  # Actions happen over 1 s length
         # Per-frame displacement is drawn from normal distribution
-        self.mu_disp = 16 / (60*FRAME_RATE)
-        self.sd_disp = 5.3 / (60*FRAME_RATE)
+        self.mu_disp = 16 / (60*GlobalDefs.frame_rate)
+        self.sd_disp = 5.3 / (60*GlobalDefs.frame_rate)
         # Sharp turn, pirouette and shallow turn angles are drawn from gaussians
         self.mu_sharp = np.deg2rad(45)
         self.sd_sharp = np.deg2rad(5)
@@ -61,7 +61,7 @@ class TemperatureArena:
         self.sd_shallow = np.deg2rad(1)
         # Per-frame crawl jitter is drawn from gaussian distribution
         self.mu_jitter = 0
-        self.sd_jitter = np.deg2rad(.1 / np.sqrt(FRAME_RATE))
+        self.sd_jitter = np.deg2rad(.1 / np.sqrt(GlobalDefs.frame_rate))
         # set up cashes of random numbers for movement parameters
         self._disp_cash = RandCash(1000, lambda s: np.abs(np.random.randn(s) * self.sd_disp + self.mu_disp))
         self._sharp_cash = RandCash(1000, lambda s: np.random.randn(s) * self.sd_sharp + self.mu_sharp)
@@ -277,11 +277,11 @@ class TrainingSimulation(TemperatureArena):
         """
         if sim_pos.shape[1] != 3:
             raise ValueError("sim_pos has to be nx3 array with xpos, ypos and heading at each timepoint")
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         start = history + 1  # start data creation with enough history present
         btypes = ["C", "S", "P", "L", "R"]
         # create vector that selects one position every second on average
-        sel = np.random.rand(sim_pos.shape[0]) < (1/FRAME_RATE)
+        sel = np.random.rand(sim_pos.shape[0]) < (1/GlobalDefs.frame_rate)
         sel[:start+1] = False
         # initialize model inputs and outputs
         inputs = np.zeros((sel.sum(), 3, history), np.float32)
@@ -405,7 +405,7 @@ class ModelSimulation(TemperatureArena):
             debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)  # the network predicted temperature for each move
             debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")  # the actually selected move
             debug_dict["true_temp"] = np.full((nsteps, 4), np.nan)  # the temperature if each move is simulated
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
         pos = np.full((nsteps + burn_period, 3), np.nan)
@@ -480,7 +480,7 @@ class ModelSimulation(TemperatureArena):
         :param pfail: Probability of randomizing the order of behaviors instead of picking ideal
         :return: nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
         """
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
         pos = np.full((nsteps + burn_period, 3), np.nan)

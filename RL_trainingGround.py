@@ -6,13 +6,14 @@
 Script to train gradient reinforcement learning navigation model
 """
 
-from core import SimpleRLNetwork, FRAME_RATE, HIST_SECONDS
+from core import SimpleRLNetwork
 from zf_simulators import TemperatureArena
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sns
 from scipy.ndimage import gaussian_filter1d
 import h5py
+from global_defs import GlobalDefs
 
 
 class RLTrainer(TemperatureArena):
@@ -93,7 +94,7 @@ class RLTrainer(TemperatureArena):
             [0] Array of nsteps x 3 position arrays (xpos, ypos, angle)
             [1] For each performed  behavior the reward received
         """
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
         pos = np.full((nsteps + burn_period, 3), np.nan)

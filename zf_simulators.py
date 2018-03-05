@@ -9,11 +9,11 @@ Note that behavior is merely approximated as the goal is not to derive a realist
 """
 
 import numpy as np
-from core import FRAME_RATE, HIST_SECONDS
 from core import RandCash, GradientData, GradientStandards, ZfGpNetworkModel, indexing_matrix
+from global_defs import GlobalDefs
 
 
-PRED_WINDOW = int(FRAME_RATE * 0.5)  # the model should predict the temperature 500 ms into the future
+PRED_WINDOW = int(GlobalDefs.frame_rate * 0.5)  # the model should predict the temperature 500 ms into the future
 
 
 class TemperatureArena:
@@ -23,8 +23,8 @@ class TemperatureArena:
     """
     def __init__(self):
         # Set bout parameters used in the simulation
-        self.p_move = 1.0 / FRAME_RATE  # Bout frequency of 1Hz on average
-        self.blen = int(FRAME_RATE * 0.2)  # Bouts happen over 200 ms length
+        self.p_move = 1.0 / GlobalDefs.frame_rate  # Bout frequency of 1Hz on average
+        self.blen = int(GlobalDefs.frame_rate * 0.2)  # Bouts happen over 200 ms length
         self.bfrac = np.linspace(0, 1, self.blen)
         # Displacement is drawn from gamma distribution
         self.disp_k = 2.63
@@ -177,7 +177,7 @@ class TrainingSimulation(TemperatureArena):
         """
         if sim_pos.shape[1] != 3:
             raise ValueError("sim_pos has to be nx3 array with xpos, ypos and heading at each timepoint")
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         start = history + 1  # start data creation with enough history present
         # initialize model inputs and outputs
         inputs = np.zeros((sim_pos.shape[0] - start, 3, history), np.float32)
@@ -245,7 +245,7 @@ class ModelSimulation(TemperatureArena):
         bfreq = 1 / (1 + np.exp(-activation))  # [0, 1]
         bfreq = (2 - 0.5) * bfreq + 0.5  # [0.5, 2]
         # return corresponding probability
-        return bfreq / FRAME_RATE
+        return bfreq / GlobalDefs.frame_rate
 
     def get_start_pos(self):
         x = np.inf
@@ -291,7 +291,7 @@ class ModelSimulation(TemperatureArena):
             debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)  # the network predicted temperature for each move
             debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")  # the actually selected move
             debug_dict["true_temp"] = np.full((nsteps, 4), np.nan)  # the temperature if each move is simulated
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
         pos = np.full((nsteps + burn_period, 3), np.nan)
@@ -357,7 +357,7 @@ class ModelSimulation(TemperatureArena):
         :param pfail: Probability of randomizing the order of behaviors instead of picking ideal
         :return: nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
         """
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
         pos = np.full((nsteps + burn_period, 3), np.nan)
@@ -509,7 +509,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         :param stim_std: The white noise stimulus standard deviation
         """
         super().__init__()
-        self.p_move = base_freq / FRAME_RATE
+        self.p_move = base_freq / GlobalDefs.frame_rate
         self.model = model
         # for stimulus we do not generate real temperatures anyway so user selects parameters
         self.stim_mean = stim_mean
@@ -539,7 +539,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         bfreq = 1 / (1 + np.exp(-activation))  # [0, 1]
         bfreq = (2 - 0.5) * bfreq + 0.5  # [0.5, 2]
         # return corresponding probability
-        return bfreq / FRAME_RATE
+        return bfreq / GlobalDefs.frame_rate
 
     def _get_bout(self, bout_type: str):
         """
@@ -583,7 +583,7 @@ class WhiteNoiseSimulation(TemperatureArena):
             [1]: Speed trace
             [2]: Angle trace
         """
-        history = HIST_SECONDS*FRAME_RATE
+        history = GlobalDefs.hist_seconds*GlobalDefs.frame_rate
         step = history
         model_in = np.zeros((1, 3, history, 1))
         behav_types = np.full(stimulus.size, -1, np.int8)
@@ -639,7 +639,8 @@ class WhiteNoiseSimulation(TemperatureArena):
         """
         def kernel(t):
             indices = np.arange(n_samples)[btype_trace == t]
-            ixm = indexing_matrix(indices, HIST_SECONDS*FRAME_RATE, FRAME_RATE, int(n_samples))[0]
+            ixm = indexing_matrix(indices, GlobalDefs.hist_seconds*GlobalDefs.frame_rate, GlobalDefs.frame_rate,
+                                  int(n_samples))[0]
             return np.mean(stim[ixm]-np.mean(stim), 0)
         if self.switch_mean <= 0:
             stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
@@ -664,7 +665,7 @@ class WhiteNoiseSimulation(TemperatureArena):
 
 class BoutFrequencyEvolver(CircleGradSimulation):
     """
-    Class to obtain parameters that turn the output of the temperature branch of a ZfGpNetworkModel into a bout frequency
+    Class to obtain parameters that turn the output of the temperature branch of a ZfGpNetworkModel into bout frequency
     such that gradient navigation efficiency will be maximised by running an evolutionary algorithm
     """
     def __init__(self, stds: GradientStandards, model: ZfGpNetworkModel, n_sel_best=10, n_sel_random=6, n_progeny=2):
@@ -694,7 +695,7 @@ class BoutFrequencyEvolver(CircleGradSimulation):
         :param debug: IGNORED
         :return: Returns a list of position arrays for each network
         """
-        history = FRAME_RATE * HIST_SECONDS
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
         net_pos = []
@@ -721,7 +722,7 @@ class BoutFrequencyEvolver(CircleGradSimulation):
                 # apply non-linearity
                 bfreqs = 1 / (1 + np.exp(-bfreqs))  # [0, 1]
                 bfreqs = (2 - 0.5) * bfreqs + 0.5  # [0.5, 2]
-                bfreqs /= FRAME_RATE  # turn into probability
+                bfreqs /= GlobalDefs.frame_rate  # turn into probability
                 last_bf_eval = steps.copy()  # update indicator
             # determine which networks should move in this step - one decider draw for all
             d = self._uni_cash.next_rand()

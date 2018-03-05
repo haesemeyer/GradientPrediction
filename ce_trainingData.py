@@ -7,7 +7,6 @@ Module to generate, save and load training and test data and provide access to t
 """
 
 import numpy as np
-from core import GradientData
 from ce_simulators import TrainingSimulation
 
 

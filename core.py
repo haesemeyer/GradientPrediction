@@ -13,12 +13,7 @@ import numpy as np
 import h5py
 import matplotlib.pyplot as pl
 import seaborn as sns
-
-
-# Constants
-FRAME_RATE = 100  # all simulations, training data models have a native framerate of 100 Hz
-HIST_SECONDS = 4  # all inputs to the models are 4s into the past
-MODEL_RATE = 5    # model input rate is 5 Hz
+from global_defs import GlobalDefs
 
 
 # Functions
@@ -195,9 +190,9 @@ class NetworkModel:
         # set training defaults
         self.w_decay = 1e-4
         self.keep_train = 0.5
-        assert FRAME_RATE % MODEL_RATE == 0
-        self.t_bin = FRAME_RATE // MODEL_RATE  # bin input down to 5Hz
-        self.binned_size = FRAME_RATE * HIST_SECONDS // self.t_bin
+        assert GlobalDefs.frame_rate % GlobalDefs.model_rate == 0
+        self.t_bin = GlobalDefs.frame_rate // GlobalDefs.model_rate  # bin input down to 5Hz
+        self.binned_size = GlobalDefs.frame_rate * GlobalDefs.hist_seconds // self.t_bin
         self._x_in = None  # network inputs
         # our branches
         self._branches = None
@@ -473,7 +468,7 @@ class GpNetworkModel(NetworkModel):
             # dropout probability placeholder
             self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
             # model input: BATCHSIZE x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
-            self._x_in = tf.placeholder(tf.float32, [None, 3, FRAME_RATE * HIST_SECONDS, 1], "x_in")
+            self._x_in = tf.placeholder(tf.float32, [None, 3, GlobalDefs.frame_rate*GlobalDefs.hist_seconds, 1], "x_in")
             # real outputs: BATCHSIZE x (dT(Stay), dT(Straight), dT(Left), dT(Right))
             self._y_ = self._create_real_out_placeholder()
             # data binning layer
@@ -1057,7 +1052,7 @@ class SimpleRLNetwork(NetworkModel):
             # dropout probability placeholder
             self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
             # model input: NSAMPLES x Temp x HISTORYSIZE x 1 CHANNEL
-            self._x_in = tf.placeholder(tf.float32, [None, 1, FRAME_RATE * HIST_SECONDS, 1], "x_in")
+            self._x_in = tf.placeholder(tf.float32, [None, 1, GlobalDefs.frame_rate*GlobalDefs.hist_seconds, 1], "x_in")
             # reward values: NSAMPLES x 1 (Note: Only picked behavior will get rewarded!)
             self._reward = tf.placeholder(tf.float32, [None, 1], name="reward")
             # sample index and index of the picked behavior: NSAMPLES x 2 (either 0 or 1, i.e. straight or turn)
@@ -1363,7 +1358,8 @@ class GradientData:
     """
     Class that represents training/test data from a gradient experiment
     """
-    def __init__(self, model_in, model_out, pred_window, frame_rate=FRAME_RATE, hist_seconds=HIST_SECONDS):
+    def __init__(self, model_in, model_out, pred_window, frame_rate=GlobalDefs.frame_rate,
+                 hist_seconds=GlobalDefs.hist_seconds):
         """
         Creates a new GradientData object
         :param model_in: The input data for training

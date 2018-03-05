@@ -14,8 +14,9 @@ import matplotlib as mpl
 import matplotlib.pyplot as pl
 import tkinter as tk
 from tkinter import filedialog
-from core import GradientData, FRAME_RATE, ModelData, ZfGpNetworkModel
+from core import GradientData, ModelData, ZfGpNetworkModel
 from trainingData import CircGradientTrainer
+from global_defs import GlobalDefs
 
 
 if __name__ == "__main__":
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
     x = np.arange(tsin.size)  # stored at 20 Hz !
-    xinterp = np.linspace(0, tsin.size, tsin.size * FRAME_RATE // 20)
+    xinterp = np.linspace(0, tsin.size, tsin.size * GlobalDefs.frame_rate // 20)
     temp = np.interp(xinterp, x, tsin)
     dfile.close()
     print("Select model directory")
@@ -52,7 +53,7 @@ if __name__ == "__main__":
     temp = np.r_[lead_in, temp]
     # run a short simulation to create some sample trajectories for speed and angle inputs
     sim = CircGradientTrainer(100, 22, 37)
-    sim.p_move = 0.1 / FRAME_RATE  # use reduced movement rate to aide visualization
+    sim.p_move = 0.1 / GlobalDefs.frame_rate  # use reduced movement rate to aide visualization
     pos = sim.run_simulation(temp.size + 1)
     spd = np.sqrt(np.sum(np.diff(pos[:, :2], axis=0)**2, 1))
     da = np.diff(pos[:, 2])
