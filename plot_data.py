@@ -14,13 +14,13 @@ from scipy.stats import linregress
 import matplotlib.pyplot as pl
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
-from core import ModelData, GradientData, ZfGpNetworkModel, FRAME_RATE, ca_convolve, PersistentStore
-from zf_simulators import CircleGradSimulation, LinearGradientSimulation, WhiteNoiseSimulation
+from core import ModelData, GradientData, ZfGpNetworkModel, FRAME_RATE, ca_convolve
+from zf_simulators import WhiteNoiseSimulation
 from analyzeTempResponses import trial_average, cluster_responses
 import os
 from pandas import DataFrame
-import pickle
-from hashlib import md5
+from global_defs import GlobalDefs, MoTypes
+from data_stores import SimulationStore, ActivityStore
 
 
 # file definitions
@@ -29,215 +29,6 @@ base_path = "./model_data/Adam_1e-4/sepInput_mixTrain/"
 paths_1024 = [f+'/' for f in os.listdir(base_path) if "_3m1024_" in f]
 paths_512 = [f+'/' for f in os.listdir(base_path) if "_3m512_" in f]
 paths_256 = [f+'/' for f in os.listdir(base_path) if "_3m256_" in f]
-# simulation globals
-n_steps = 2000000
-TPREFERRED = 26
-circle_sim_params = {"radius": 100, "t_min": 22, "t_max": 37, "t_preferred": TPREFERRED}
-lin_sim_params = {"xmax": 100, "ymax": 100, "t_min": 22, "t_max": 37, "t_preferred": TPREFERRED}
-
-
-class ModelStore(PersistentStore):
-    """
-    Hdf5 backed store of data derived from using network model
-    """
-    def __init__(self, db_file_name, read_only=False):
-        super().__init__(db_file_name, read_only)
-
-    @staticmethod
-    def model_dir_name(model_path: str):
-        """
-        Takes a full model path and returns the name of the actual directory containing the model definitions
-        :param model_path: The full model path
-        :return: Name of the model directory
-        """
-        if '\\' in model_path:
-            spl = model_path.split('\\')
-        else:
-            spl = model_path.split('/')
-        if len(spl[-1]) > 0:
-            return spl[-1]
-        else:
-            return spl[-2]
-
-
-class SimulationStore(ModelStore):
-    """
-    Hdf5 backed store of simulation data
-    """
-    def __init__(self, db_file_name, read_only=False):
-        super().__init__(db_file_name, read_only)
-
-    @staticmethod
-    def _val_ids(sim_type: str, network_state: str):
-        """
-        Validates id parameters
-        :param sim_type: Indicator of simulation type
-        :param network_state: Indicator of network state
-        """
-        val_types = ['r', 'l']
-        if sim_type not in val_types:
-            raise ValueError("sim_type {0} is not valid has to be one of {1}".format(sim_type, val_types))
-        val_states = ['naive', 'trained', 'ideal', 'bfevolve']
-        if network_state not in val_states:
-            raise ValueError("network_state {0} is not valid has to be one of {1}".format(network_state, val_states))
-
-    @staticmethod
-    def _run_sim(model_path: str, sim_type: str, network_state: str, debug: bool, drop_list=None):
-        """
-        Run simulation to obtain position and possibly debug information
-        :param model_path: Full path to the network model definitions
-        :param sim_type: Indicator of simulation type
-        :param network_state: Indicator of network state
-        :param debug: If true return debug information as well
-        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
-        :return:
-            [0]: n_steps x 3 matrix of position information at each step
-            [1]: Debug dict if debug is true or None otherwise
-        """
-        global std
-        global TPREFERRED
-        global n_steps
-        mdata = ModelData(model_path)
-        if network_state == "naive":
-            chk = mdata.FirstCheckpoint
-        else:
-            chk = mdata.LastCheckpoint
-        gpn = ZfGpNetworkModel()
-        gpn.load(mdata.ModelDefinition, chk)
-        if sim_type == "r":
-            sim = CircleGradSimulation(gpn, std, **circle_sim_params)
-        else:
-            sim = LinearGradientSimulation(gpn, std, **lin_sim_params)
-        sim.remove = drop_list
-        if network_state == "bfevolve":
-            ev_path = model_path + '/evolve/generation_weights.npy'
-            weights = np.load(ev_path)
-            w = np.mean(weights[-1, :, :], 0)
-            sim.bf_weights = w
-        if network_state == "ideal":
-            return sim.run_ideal(n_steps)
-        else:
-            return sim.run_simulation(n_steps, debug)
-
-    def get_sim_pos(self, model_path: str, sim_type: str, network_state: str, drop_list=None) -> np.ndarray:
-        """
-        Retrieves simulation positions from the storage or runs simulation
-        :param model_path: The full path to the network model
-        :param sim_type: The simulation type, r = radial, l = linear
-        :param network_state: The state of the netowrk: naive, trained, ideal or bfevolve
-        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
-        :return: The simulation positions
-        """
-        self._val_ids(sim_type, network_state)
-        if drop_list is not None:
-            # currently we do not store simulations that drop units
-            return self._run_sim(model_path, sim_type, network_state, False, drop_list)
-        mdir = self.model_dir_name(model_path)
-        pos = self._get_data(mdir, sim_type, network_state, "pos")
-        if pos is not None:
-            return pos
-        else:
-            pos = self._run_sim(model_path, sim_type, network_state, False)
-            self._set_data(pos, mdir, sim_type, network_state, "pos")
-            return pos
-
-    def get_sim_debug(self, model_path: str, sim_type: str, network_state: str, drop_list=None):
-        """
-        Retrieves simulation debug dict from the storage or runs simulation
-        :param model_path: The full path to the network model
-        :param sim_type: The simulation type, r = radial, l = linear
-        :param network_state: The state of the netowrk: naive, trained, ideal or bfevolve
-        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
-        :return:
-            [0]: The simulation positions
-            [1]: The simulation debug dict
-        """
-        self._val_ids(sim_type, network_state)
-        if network_state == "ideal":
-            raise ValueError("debug information is currently not returned for ideal simulation")
-        if drop_list is not None:
-            # currently we do not store simulations that drop units
-            return self._run_sim(model_path, sim_type, network_state, True, drop_list)
-        mdir = self.model_dir_name(model_path)
-        db_pickle = self._get_data(mdir, sim_type, network_state, "debug")
-        pos = self._get_data(mdir, sim_type, network_state, "pos")
-        if db_pickle is not None and pos is not None:
-            deb_dict = pickle.loads(db_pickle)
-            return pos, deb_dict
-        else:
-            pos, dbdict = self._run_sim(model_path, sim_type, network_state, True)
-            self._set_data(pos, mdir, sim_type, network_state, "pos")
-            self._set_data(np.void(pickle.dumps(dbdict)), mdir, sim_type, network_state, "debug")
-            return pos, dbdict
-
-
-class ActivityStore(ModelStore):
-    """
-    Hdf5 backed store of network cell activity data
-    """
-    def __init__(self, db_file_name, read_only=False):
-        super().__init__(db_file_name, read_only)
-
-    @staticmethod
-    def _compute_cell_responses(model_dir, temp, network_id):
-        """
-        Loads a model and computes the temperature response of all neurons returning response matrix
-        :param model_dir: The directory of the network model
-        :param temp: The temperature input to test on the network
-        :param network_id: Numerical id of the network to later relate units back to a network
-        :return:
-            [0]: n-timepoints x m-neurons matrix of responses
-            [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
-        """
-        global std
-        mdata = ModelData(model_dir)
-        gpn_trained = ZfGpNetworkModel()
-        gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-        # prepend lead-in to stimulus
-        lead_in = np.full(gpn_trained.input_dims[2] - 1, np.mean(temp[:10]))
-        temp = np.r_[lead_in, temp]
-        act_dict = gpn_trained.unit_stimulus_responses(temp, None, None, std)
-        if 't' in act_dict:
-            activities = act_dict['t']
-        else:
-            activities = act_dict['m']
-        activities = np.hstack(activities)
-        # build id matrix
-        id_mat = np.zeros((3, activities.shape[1]), dtype=np.int32)
-        id_mat[0, :] = network_id
-        if 't' in act_dict:
-            hidden_sizes = [gpn_trained.n_units[0]] * gpn_trained.n_layers_branch
-        else:
-            hidden_sizes = [gpn_trained.n_units[1]] * gpn_trained.n_layers_mixed
-        start = 0
-        for layer, hs in enumerate(hidden_sizes):
-            id_mat[1, start:start + hs] = layer
-            id_mat[2, start:start + hs] = np.arange(hs, dtype=np.int32)
-            start += hs
-        return activities, id_mat
-
-    def get_cell_responses(self, model_path: str, temperature: np.ndarray, network_id: int):
-        """
-        Obtain cell responses of all units in the given model for the given temperature stimulus
-        :param model_path: The full path to the network model
-        :param temperature: The temperature stimulus to present to the network
-        :param network_id: An assigned numerical id of the network to later relate units back to a network
-        :return:
-            [0]: n-timepoints x m-neurons matrix of responses
-            [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1 and unit index in row 2
-        """
-        stim_hash = md5(temperature).hexdigest()
-        mdir = self.model_dir_name(model_path)
-        activities = self._get_data(mdir, stim_hash, "activities")
-        id_mat = self._get_data(mdir, stim_hash, "id_mat")
-        if activities is not None and id_mat is not None:
-            # re-assign network id
-            id_mat[0, :] = network_id
-            return activities, id_mat
-        activities, id_mat = self._compute_cell_responses(model_path, temperature, network_id)
-        self._set_data(activities, mdir, stim_hash, "activities")
-        self._set_data(id_mat, mdir, stim_hash, "id_mat")
-        return activities, id_mat
 
 
 def loss_file(path):
@@ -334,6 +125,8 @@ def temp_convert(distances, sim_type):
     """
     Converts center or origin distances into temperature values according to our standard simulation types
     """
+    circle_sim_params = GlobalDefs.circle_sim_params
+    lin_sim_params = GlobalDefs.lin_sim_params
     if sim_type == "r":
         return distances / circle_sim_params["radius"] * (circle_sim_params["t_max"] - circle_sim_params["t_min"]) + \
                circle_sim_params["t_min"]
@@ -357,7 +150,7 @@ def do_simulation(path, sim_type, run_ideal, drop_list=None):
         [3]: The occupancy of the ideal choice model if run_ideal=True, None otherwise
         [4]: The occupancy of a unit dropped model if drop_list is provided, None otherwise
     """
-    bins = np.linspace(0, circle_sim_params["radius"], 100)
+    bins = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
     # bin-centers in degress
     bcenters = bins[:-1]+np.diff(bins)/2
     bcenters = temp_convert(bcenters, sim_type)
@@ -365,7 +158,7 @@ def do_simulation(path, sim_type, run_ideal, drop_list=None):
         simdir = "x"
     else:
         simdir = "r"
-    with SimulationStore("sim_store.hdf5") as sim_store:
+    with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
         pos_naive = sim_store.get_sim_pos(path, sim_type, "naive")
         h_naive = bin_simulation(pos_naive, bins, simdir)
         pos_trained = sim_store.get_sim_pos(path, sim_type, "trained")
@@ -414,7 +207,7 @@ def plot_sim(sim_type):
     ax.plot(bins, np.mean(t_1024, 0), lw=2, label="1024 HU", c="C2")
     sns.tsplot(all_n, bins, n_boot=1000, ax=ax, color="k")
     ax.plot(bins, np.mean(all_n, 0), "k", lw=2, label="Naive")
-    ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'C4--')
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], ax.get_ylim(), 'C4--')
     ax.set_ylim(0)
     ax.legend()
     ax.set_ylabel("Proportion")
@@ -457,7 +250,7 @@ def plot_sim_debug(path, sim_type, drop_list=None):
         [0]: The simulation positions
         [1]: The debug dict
     """
-    with SimulationStore("sim_store.hdf5") as sim_store:
+    with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
         all_pos, db_dict = sim_store.get_sim_debug(path, sim_type, "trained", drop_list)
     ct = db_dict["curr_temp"]
     val = np.logical_not(np.isnan(ct))
@@ -549,9 +342,9 @@ def plot_fish_nonfish_analysis(sim_type="r"):
                 weights = 1 / np.sqrt(np.sum(all_pos[:, :2]**2, 1))
                 weights[np.isinf(weights)] = 0  # occurs when 0,0 was picked as starting point only
                 sum_of_weights = np.nansum(weights)
-                weighted_sum = np.nansum(np.sqrt((temp_pos - TPREFERRED)**2) * weights)
+                weighted_sum = np.nansum(np.sqrt((temp_pos - GlobalDefs.tPreferred)**2) * weights)
                 return weighted_sum / sum_of_weights
-            return np.mean(np.sqrt((temp_pos - TPREFERRED)**2))
+            return np.mean(np.sqrt((temp_pos - GlobalDefs.tPreferred)**2))
 
         nonlocal sim_type
         nonlocal fish
@@ -559,14 +352,14 @@ def plot_fish_nonfish_analysis(sim_type="r"):
         fish_remove = create_det_drop_list(net_id, clust_ids, all_ids, fish)
         nonfish_remove = create_det_drop_list(net_id, clust_ids, all_ids, non_fish)
         shuff_remove = create_det_drop_list(net_id, clust_ids, all_ids, fish, True)
-        with SimulationStore("sim_store.hdf5") as sim_store:
+        with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
             pos_naive, db_naive = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "naive")
             pos_trained, db_trained = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve")
             pos_fish, db_fish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve", fish_remove)
             pos_nonfish, db_nonfish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve",
                                                               nonfish_remove)
             pos_shuff, db_shuff = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve", shuff_remove)
-        bins = np.linspace(0, circle_sim_params["radius"], 100)
+        bins = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
         bc, h_naive = bin_pos(pos_naive)
         e_naive = temp_error(pos_naive)
         h_trained = bin_pos(pos_trained)[1]
@@ -676,7 +469,7 @@ def plot_fish_nonfish_analysis(sim_type="r"):
         sns.tsplot(dists[k], bcents, ax=ax, color=colors[k])
         ax.plot(bcents, np.mean(dists[k], 0), color=colors[k], label=labels[k])
     ax.set_ylim(0)
-    ax.plot([TPREFERRED, TPREFERRED], ax.get_ylim(), 'k--')
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], ax.get_ylim(), 'k--')
     ax.set_xlabel("Temperature")
     ax.set_ylabel("Occupancy")
     ax.legend()
@@ -721,7 +514,7 @@ def compute_gradient_bout_frequency(model_path, drop_list=None):
         bfreq = cnt_r_bs / cnt_r * FRAME_RATE
         return bfreq, bcenters
 
-    with SimulationStore("sim_store.hdf5") as sim_store:
+    with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
         pos_fixed = sim_store.get_sim_pos(model_path, "r", "trained", drop_list)
         pos_var = sim_store.get_sim_pos(model_path, "r", "bfevolve", drop_list)
     bf_fixed, bc = bout_freq(pos_fixed)
@@ -752,7 +545,7 @@ if __name__ == "__main__":
     all_cells = []
     all_ids = []
     for i, d in enumerate(paths_512):
-        with ActivityStore("activity_store.hdf5") as act_store:
+        with ActivityStore("activity_store.hdf5", std, MoTypes(False)) as act_store:
             cell_res, ids = act_store.get_cell_responses(mpath(d), temperature, i)
         all_cells.append(cell_res)
         all_ids.append(ids)
