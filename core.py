@@ -1602,6 +1602,9 @@ class PersistentStore:
         Clears data at hdf5 path indicated by *args. Raises KeyError if data does not exist
         :param args: Ordered series of group/data keys
         """
+        self._check_open()
+        if self._read_only:
+            raise IOError("Deleting not allowed on readonly object")
         identifier = self._identifier(*args)
         if identifier in self._db_file:
             del self._db_file[identifier]
