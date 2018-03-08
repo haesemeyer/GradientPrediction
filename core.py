@@ -1530,10 +1530,13 @@ class PersistentStore:
     def __init__(self, db_file_name, read_only=False):
         """
         Create a new store with the indicated file as backend
-        :param db_file_name: The path and name of backend file. File will be created if it doesn't exist
+        :param db_file_name: The path and name of backend file. File will be created if it doesn't exist. Can be None
+            in which case store will exist non-persistent in memory.
         :param read_only: No changes allowed to backend and will fail if file does not exist
         """
         self._db_filename = db_file_name
+        if db_file_name is None and read_only:
+            raise ValueError("Pure memory storage can't be readonly")
         self._read_only = read_only
         self._db_file = None  # type: h5py.File
 
@@ -1541,6 +1544,11 @@ class PersistentStore:
         """
         Entry point for context manager - open backend
         """
+        if self._db_filename is None:
+            # create memory-only representation for short-term caching
+            import uuid
+            self._db_file = h5py.File(str(uuid.uuid4()), "w", driver="core", backing_store=False)
+            return self
         if self._read_only:
             self._db_file = h5py.File(self._db_filename, "r")
         else:
@@ -1602,6 +1610,9 @@ class PersistentStore:
         Clears data at hdf5 path indicated by *args. Raises KeyError if data does not exist
         :param args: Ordered series of group/data keys
         """
+        self._check_open()
+        if self._read_only:
+            raise IOError("Deleting not allowed on readonly object")
         identifier = self._identifier(*args)
         if identifier in self._db_file:
             del self._db_file[identifier]
