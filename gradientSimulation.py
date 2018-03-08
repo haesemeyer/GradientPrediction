@@ -13,11 +13,12 @@ import tkinter as tk
 from tkinter import filedialog
 import sys
 import matplotlib as mpl
-from core import ModelData, GradientData, ZfGpNetworkModel
-from zf_simulators import ModelSimulation, CircleGradSimulation, LinearGradientSimulation
+from core import ModelData, GradientData
+from global_defs import GlobalDefs
+from mo_types import MoTypes
 
 
-def run_simulation(simulation: ModelSimulation, n_steps, run_ideal=False, simdir="r"):
+def run_simulation(simulation, n_steps, run_ideal=False, simdir="r"):
     """
     Run a neural network model simulation computing occupancy histograms
     :param simulation: The simulation to run
@@ -60,6 +61,10 @@ if __name__ == "__main__":
         print("On OSX tkinter likely does not work properly if matplotlib uses a backend that is not TkAgg!")
         print("If using ipython activate TkAgg backend with '%matplotlib tk' and retry.")
         sys.exit(1)
+    mo_type = ""
+    while mo_type != "c" and mo_type != "z":
+        mo_type = input("Please select either (z)ebrafish or (c) elegans simulation [z/c]:")
+        mo_type = mo_type.lower()
     n_steps = 2000000
     TPREFERRED = 25
     root = tk.Tk()
@@ -70,27 +75,30 @@ if __name__ == "__main__":
     root.update()
     mdata = ModelData(model_dir)
     # load training data for scaling
-    try:
+    if mo_type == "z":
         std = GradientData.load_standards("gd_training_data.hdf5")
-    except IOError:
-        print("No standards found attempting to load full training data")
-        std = GradientData.load("gd_training_data.hdf5").standards
+    else:
+        std = GradientData.load_standards("ce_gd_training_data.hdf5")
     sim_type = ""
     while sim_type != "l" and sim_type != "r":
         sim_type = input("Please select either (l)inear or (r)adial simulation [l/r]:")
-    gpn_naive = ZfGpNetworkModel()
+    if mo_type == "z":
+        mot = MoTypes(False)
+    else:
+        mot = MoTypes(True)
+    gpn_naive = mot.network_model()
     gpn_naive.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
-    gpn_trained = ZfGpNetworkModel()
+    gpn_trained = mot.network_model()
     gpn_trained.load(mdata.ModelDefinition, mdata.LastCheckpoint)
     if sim_type == "l":
         sim_type = "x"  # so we call run_simulation correctly later
-        sim_naive = LinearGradientSimulation(gpn_naive, std, 100, 100, 22, 37, TPREFERRED)
-        sim_trained = LinearGradientSimulation(gpn_trained, std, 100, 100, 22, 37, TPREFERRED)
+        sim_naive = mot.lin_sim(gpn_naive, std, **GlobalDefs.lin_sim_params)
+        sim_trained = mot.lin_sim(gpn_trained, std, **GlobalDefs.lin_sim_params)
     else:
-        sim_naive = CircleGradSimulation(gpn_naive, std, 100, 22, 37, TPREFERRED)
-        sim_trained = CircleGradSimulation(gpn_trained, std, 100, 22, 37, TPREFERRED)
+        sim_naive = mot.rad_sim(gpn_naive, std, **GlobalDefs.circle_sim_params)
+        sim_trained = mot.rad_sim(gpn_trained, std, **GlobalDefs.circle_sim_params)
     b_naive, h_naive = run_simulation(sim_naive, n_steps, False, sim_type)[1:]
-    b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)[1:]
+    pos_trained, b_trained, h_trained = run_simulation(sim_trained, n_steps, False, sim_type)
     b_ideal, h_ideal = run_simulation(sim_trained, n_steps, True, sim_type)[1:]
 
     fig, ax = pl.subplots()
@@ -105,3 +113,9 @@ if __name__ == "__main__":
     ax.set_ylim(0)
     ax.legend()
     sns.despine(fig, ax)
+
+    h2d_trained = np.histogram2d(pos_trained[:, 1], pos_trained[:, 0], 100, normed=True)[0]
+    fig, ax = pl.subplots()
+    sns.heatmap(h2d_trained, xticklabels=False, yticklabels=False)
+    ax.set_xlabel("X position")
+    ax.set_ylabel("Y position")
