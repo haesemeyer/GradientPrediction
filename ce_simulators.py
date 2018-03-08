@@ -402,9 +402,9 @@ class ModelSimulation(TemperatureArena):
         if debug:
             # debug dict only contains information for timesteps which were select for possible movement!
             debug_dict["curr_temp"] = np.full(nsteps, np.nan)  # the current temperature at this position
-            debug_dict["pred_temp"] = np.full((nsteps, 4), np.nan)  # the network predicted temperature for each move
+            debug_dict["pred_temp"] = np.full((nsteps, 5), np.nan)  # the network predicted temperature for each move
             debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")  # the actually selected move
-            debug_dict["true_temp"] = np.full((nsteps, 4), np.nan)  # the temperature if each move is simulated
+            debug_dict["true_temp"] = np.full((nsteps, 5), np.nan)  # the temperature if each move is simulated
         history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
@@ -449,7 +449,9 @@ class ModelSimulation(TemperatureArena):
                 debug_dict["pred_temp"][dbpos, :] = model_out * self.temp_std + self.temp_mean
                 debug_dict["sel_behav"][dbpos] = bt
                 for i, b in enumerate(self.btypes):
-                    fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                    fpos = self.sim_forward(self.alen, pos[step-1, :], b)[-1, :]
+                    fpos[0] += np.cos(fpos[2]) * PRED_WINDOW * self.mu_disp
+                    fpos[1] += np.sin(fpos[2]) * PRED_WINDOW * self.mu_disp
                     t_out[i] = self.temperature(fpos[0], fpos[1])
                 debug_dict["true_temp"][dbpos, :] = t_out
             if bt == "C":
