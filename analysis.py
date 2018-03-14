@@ -9,7 +9,7 @@ Module for data analysis classes and functions
 from mo_types import MoTypes
 from global_defs import GlobalDefs
 import numpy as np
-from data_stores import SimulationStore
+from data_stores import SimulationStore, ActivityStore
 from core import GradientStandards
 
 
@@ -48,6 +48,19 @@ class Analyzer:
                 return sim_store.get_sim_debug(path, sim_type, network_state, drop_list)
             else:
                 return sim_store.get_sim_pos(path, sim_type, network_state, drop_list)
+
+    def temperature_activity(self, path, temperature, network_id):
+        """
+        Uses a model identified by path and returns activity of all cells in the temperature branch
+        :param path: The model path
+        :param temperature: The temperature stiumulus
+        :param network_id: The network id for constructing correct unit ids
+        :return:
+            [0]: n-timepoints x m-neurons matrix of responses
+            [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
+        """
+        with ActivityStore(self.act_store_name, self.std, self.mo) as act_store:
+            return act_store.get_cell_responses(path, temperature, network_id)
 
 
 def bin_simulation(pos, bins: np.ndarray, simdir="r"):
@@ -161,3 +174,16 @@ def preferred_fraction(all_pos: np.ndarray, sim_type: str, delta_t=1.0):
     sum_of_weights = np.nansum(weights)
     in_delta = np.logical_and(temp_pos > GlobalDefs.tPreferred-delta_t, temp_pos < GlobalDefs.tPreferred+delta_t)
     return np.nansum(weights[in_delta]) / sum_of_weights
+
+
+def trial_average(mat, n_trials):
+    """
+    Computes the trial average of each trace in mat
+    :param mat: n-timepoints x m-cells matrix of traces
+    :param n_trials: The number of trials
+    :return: Trial average activity of shape (n-timepoints/n_trials) x m-cells
+    """
+    if mat.shape[0] % n_trials != 0:
+        raise ValueError("Number of timepoints can't be divided into select number of trials")
+    t_length = mat.shape[0] // n_trials
+    return np.mean(mat.reshape((n_trials, t_length, mat.shape[1])), 0)
