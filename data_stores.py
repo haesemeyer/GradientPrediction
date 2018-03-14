@@ -113,10 +113,9 @@ class SimulationStore(ModelStore):
         """
         self._val_ids(sim_type, network_state)
         mdir = self.model_dir_name(model_path)
-        get_list = [mdir, sim_type, network_state, "pos"] if drop_list is None else [mdir, sim_type, network_state,
-                                                                                     md5(str(drop_list).encode()),
-                                                                                     "pos"]
-        pos = self._get_data(*get_list)
+        get_list = [mdir, sim_type, network_state] if drop_list is None else [mdir, sim_type, network_state,
+                                                                              md5(str(drop_list).encode()).hexdigest()]
+        pos = self._get_data(*get_list, "pos")
         if pos is not None:
             return pos
         else:
@@ -140,7 +139,7 @@ class SimulationStore(ModelStore):
             raise ValueError("debug information is currently not returned for ideal simulation")
         mdir = self.model_dir_name(model_path)
         get_list = [mdir, sim_type, network_state] if drop_list is None else [mdir, sim_type, network_state,
-                                                                              md5(str(drop_list).encode())]
+                                                                              md5(str(drop_list).encode()).hexdigest()]
         db_pickle = self._get_data(*get_list, "debug")
         pos = self._get_data(*get_list, "pos")
         if db_pickle is not None and pos is not None:
