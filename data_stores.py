@@ -120,7 +120,7 @@ class SimulationStore(ModelStore):
             return pos
         else:
             pos = self._run_sim(model_path, sim_type, network_state, False, drop_list)
-            self._set_data(pos, *get_list)
+            self._set_data(pos, *get_list, "pos")
             return pos
 
     def get_sim_debug(self, model_path: str, sim_type: str, network_state: str, drop_list=None):
