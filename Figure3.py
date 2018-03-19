@@ -18,6 +18,7 @@ import h5py
 from data_stores import SimulationStore
 from mo_types import MoTypes
 from Figure4 import mpath
+from sklearn.decomposition import PCA
 
 
 # file definitions
@@ -37,6 +38,17 @@ def test_loss(path):
     return timepoints, test_losses, rank_errors
 
 
+def plot_pc(index):
+    global coords
+    f, axis = pl.subplots()
+    sns.kdeplot(coords[species_id == 0, index]/np.sqrt(pca.explained_variance_[i]), shade=True, ax=axis)
+    sns.kdeplot(coords[species_id == 1, index]/np.sqrt(pca.explained_variance_[i]), shade=True, ax=axis)
+    axis.set_xlabel("PC {0}".format(index+1))
+    axis.set_ylabel("Density")
+    sns.despine(f, axis)
+    f.savefig(save_folder + "PC_SpaceComparison_PC{0}.pdf".format(index+1), type="pdf")
+
+
 if __name__ == "__main__":
     save_folder = "./DataFigures/Figure3/"
     if not os.path.exists(save_folder):
@@ -48,6 +60,40 @@ if __name__ == "__main__":
     ana_zf = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", "activity_store.hdf5")
     std_ce = c.GradientData.load_standards("ce_gd_training_data.hdf5")
     ana_ce = a.Analyzer(MoTypes(True), std_ce, "ce_sim_store.hdf5", "ce_activity_store.hdf5")
+
+    # load activity clusters from file
+    clfile = h5py.File("cluster_info.hdf5", "r")
+    clust_ids_zf = np.array(clfile["clust_ids"])
+    clfile.close()
+    clfile = h5py.File("ce_cluster_info.hdf5", "r")
+    clust_ids_ce = np.array(clfile["clust_ids"])
+    clfile.close()
+
+    # load and interpolate temperature stimulus
+    dfile = h5py.File("stimFile.hdf5", 'r')
+    tsin = np.array(dfile['sine_L_H_temp'])
+    x = np.arange(tsin.size)  # stored at 20 Hz !
+    xinterp = np.linspace(0, tsin.size, tsin.size * GlobalDefs.frame_rate // 20)
+    temperature = np.interp(xinterp, x, tsin)
+    dfile.close()
+
+    # get activity data
+    all_ids_zf = []
+    all_cells_zf = []
+    for i, p in enumerate(paths_512_zf):
+        cell_res, ids = ana_zf.temperature_activity(mpath(base_path_zf, p), temperature, i)
+        all_ids_zf.append(ids)
+        all_cells_zf.append(cell_res)
+    all_ids_zf = np.hstack(all_ids_zf)
+    all_cells_zf = np.hstack(all_cells_zf)
+    all_ids_ce = []
+    all_cells_ce = []
+    for i, p in enumerate(paths_512_ce):
+        cell_res, ids = ana_ce.temperature_activity(mpath(base_path_ce, p), temperature, i)
+        all_ids_ce.append(ids)
+        all_cells_ce.append(cell_res)
+    all_ids_ce = np.hstack(all_ids_ce)
+    all_cells_ce = np.hstack(all_cells_ce)
 
     # first panel - rank error progression over training
     test_time = test_loss(paths_512_ce[0])[0]
@@ -66,7 +112,7 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder+"test_rank_errors.pdf", type="pdf")
 
-    # second panel - gradient distribution naive, trained, evolved
+    # second panel - gradient distribution naive, trained
     bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
     centers = a.temp_convert(bns[:-1]+np.diff(bns), "r")
     naive = np.empty((len(paths_512_ce), centers.size))
@@ -86,3 +132,16 @@ if __name__ == "__main__":
     ax.set_yticks([0, 0.025, 0.05, 0.075])
     sns.despine(fig, ax)
     fig.savefig(save_folder+"gradient_distribution.pdf", type="pdf")
+
+    # third panel - comparison of cell response location in PCA space
+    all_cells = np.hstack((a.trial_average(all_cells_zf, 3), a.trial_average(all_cells_ce, 3))).T
+    max_vals = np.max(all_cells, 1, keepdims=True)
+    max_vals[max_vals == 0] = 1  # these cells do not show any response
+    all_cells /= max_vals
+    species_id = np.zeros(all_cells.shape[0])
+    species_id[all_cells_zf.shape[1]:] = 1
+    pca = PCA(4)
+    pca.fit(all_cells)
+    coords = pca.transform(all_cells)
+    for i in range(pca.n_components):
+        plot_pc(i)
