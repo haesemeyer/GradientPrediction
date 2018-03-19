@@ -18,6 +18,7 @@ import analysis as a
 import h5py
 from global_defs import GlobalDefs
 from pandas import DataFrame
+import pickle
 
 
 # file definitions
@@ -81,7 +82,116 @@ if __name__ == "__main__":
         all_ids_ce.append(ids)
     all_ids_ce = np.hstack(all_ids_ce)
 
+    # panel 1: Robustness of zfish and cele networks to random removals - gradient performance vs. percent removed
+    percent_to_remove = [25, 50, 75, 85, 90, 95, 97, 99]
+    rem_d = {"state": [], "values": [], "species": []}
+    # store the random removal drop-lists to disk so that we can quickly re-make this panel from
+    # stored simulation results - as these depend on the drop-list they would never be loaded
+    # if drop-lists are randomized every time
+    dlist_file = h5py.File("drop_lists.hdf5")
+    for i, p in enumerate(paths_512_zf):
+        mp = mpath(base_path_zf, p)
+        pos = ana_zf.run_simulation(mp, "r", "naive")
+        rem_d["values"].append(a.preferred_fraction(pos, "r", 1.0))
+        rem_d["state"].append("naive")
+        rem_d["species"].append("zebrafish")
+        pos = ana_zf.run_simulation(mp, "r", "bfevolve")
+        rem_d["values"].append(a.preferred_fraction(pos, "r", 1.0))
+        rem_d["state"].append("trained")
+        rem_d["species"].append("zebrafish")
+        for ptr in percent_to_remove:
+            file_key = mp + "_{0}".format(ptr)
+            rem_d["state"].append("{0} %".format(ptr))
+            rem_d["species"].append("zebrafish")
+            rand_clusts = np.zeros(all_ids_zf.shape[1])
+            nw_units = rand_clusts.size // (len(paths_512_zf)*2)  # assume 2 layers in t branch
+            if file_key in dlist_file:
+                dlist = pickle.loads(np.array(dlist_file[file_key]))
+            else:
+                # loop through each invidual layer removing desired number of units (since we never shuffle
+                # between layers)
+                for j in range(len(paths_512_zf)*2):
+                    rand_clusts[j * nw_units:j * nw_units + int(nw_units * ptr / 100)] = 1
+                dlist = a.create_det_drop_list(i, rand_clusts, all_ids_zf, [1], True)
+                print("Desired: {0}, actual 1: {1}, actual 2: {2}".format(ptr, 100*dlist['t'][0].sum()/512, 100*dlist['t'][1].sum()/512))
+                dlist_file.create_dataset(file_key, data=np.void(pickle.dumps(dlist, pickle.HIGHEST_PROTOCOL)))
+            pos = ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist)
+            rem_d["values"].append(a.preferred_fraction(pos, "r", 1.0))
+    for i, p in enumerate(paths_512_ce):
+        mp = mpath(base_path_ce, p)
+        pos = ana_ce.run_simulation(mp, "r", "naive")
+        rem_d["values"].append(a.preferred_fraction(pos, "r", 1.0))
+        rem_d["state"].append("naive")
+        rem_d["species"].append("C elegans")
+        pos = ana_ce.run_simulation(mp, "r", "trained")
+        rem_d["values"].append(a.preferred_fraction(pos, "r", 1.0))
+        rem_d["state"].append("trained")
+        rem_d["species"].append("C elegans")
+        for ptr in percent_to_remove:
+            file_key = mp + "_{0}".format(ptr)
+            rem_d["state"].append("{0} %".format(ptr))
+            rem_d["species"].append("C elegans")
+            rand_clusts = np.zeros(all_ids_ce.shape[1])
+            nw_units = rand_clusts.size // (len(paths_512_ce)*2)
+            if file_key in dlist_file:
+                dlist = pickle.loads(np.array(dlist_file[file_key]))
+            else:
+                for j in range(len(paths_512_ce)*2):
+                    rand_clusts[j * nw_units:j * nw_units + int(nw_units * ptr / 100)] = 1
+                dlist = a.create_det_drop_list(i, rand_clusts, all_ids_ce, [1], True)
+                dlist_file.create_dataset(file_key, data=np.void(pickle.dumps(dlist, pickle.HIGHEST_PROTOCOL)))
+            pos = ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist)
+            rem_d["values"].append(a.preferred_fraction(pos, "r", 1.0))
+    dlist_file.close()
+    rem_d = DataFrame(rem_d)
+    fig, ax = pl.subplots()
+    sns.pointplot("state", "values", "species", rem_d, ci=68, ax=ax)
+    ax.set_ylabel("Fraction within +/- 1C")
+    ax.set_xlabel("")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "network_stability.pdf", type="pdf")
+
     # panel 2: Full distribution of example type removals in zebrafish
+    # for fish-like clusters - their indices
+    fast_on_like = 4
+    slow_on_like = 5
+    fast_off_like = 1
+    slow_off_like = 3
+    bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
+    centers = a.temp_convert(bns[:-1] + np.diff(bns), "r")
+    evolved = np.empty((len(paths_512_zf), centers.size))
+    f_on_rem = np.empty_like(evolved)
+    s_on_rem = np.empty_like(evolved)
+    f_off_rem = np.empty_like(evolved)
+    s_off_rem = np.empty_like(evolved)
+    for i, p in enumerate(paths_512_zf):
+        mp = mpath(base_path_zf, p)
+        pos_e = ana_zf.run_simulation(mp, "r", "bfevolve")
+        evolved[i, :] = a.bin_simulation(pos_e, bns, "r")
+        dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [fast_on_like])
+        pos = ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist)
+        f_on_rem[i, :] = a.bin_simulation(pos, bns, "r")
+        dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [slow_on_like])
+        pos = ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist)
+        s_on_rem[i, :] = a.bin_simulation(pos, bns, "r")
+        dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [fast_off_like])
+        pos = ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist)
+        f_off_rem[i, :] = a.bin_simulation(pos, bns, "r")
+        dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [slow_off_like])
+        pos = ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist)
+        s_off_rem[i, :] = a.bin_simulation(pos, bns, "r")
+    fig, ax = pl.subplots()
+    sns.tsplot(evolved, centers, n_boot=1000, condition="trained", color="k")
+    sns.tsplot(f_on_rem, centers, n_boot=1000, condition="Fast ON", color=plot_cols_zf[fast_on_like])
+    sns.tsplot(s_on_rem, centers, n_boot=1000, condition="Slow ON", color=plot_cols_zf[slow_on_like])
+    sns.tsplot(f_off_rem, centers, n_boot=1000, condition="Fast OFF", color=plot_cols_zf[fast_off_like])
+    sns.tsplot(s_off_rem, centers, n_boot=1000, condition="Slow OFF", color=plot_cols_zf[slow_off_like])
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.05], 'k--', lw=0.25)
+    ax.legend()
+    ax.set_xlabel("Temperature [C]")
+    ax.set_ylabel("Proportion")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "zf_rem_gradient_distribution.pdf", type="pdf")
 
     # panel 3: Aggregated type removals in zebrafish
     rem_dict = {i: [] for i in range(8)}
