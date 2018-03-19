@@ -53,26 +53,22 @@ def create_weight_var(name, shape, w_decay=None, loss_collection="losses", dale=
     :param shape: The desired shape
     :param w_decay: None or L2 loss term if weight decay is desired
     :param loss_collection: The name of the collection to which loss should be added
-    :param dale: If set to true constrain 1/2 of upstream units to contribute only inhibition 1/2 only excitation
+    :param dale: If set to true enforce L1 loss on those weights going out of a unit whose sign is opposite
+        of the average sign of weights from that unit
     :return: The weight variable
     """
+    var = tf.get_variable(name, shape, initializer=tf.contrib.layers.xavier_initializer())
     if dale:
-        var = tf.get_variable(name, shape, initializer=tf.contrib.layers.xavier_initializer(),
-                              constraint=lambda x: dale_constraint(x))
-    else:
-        var = tf.get_variable(name, shape, initializer=tf.contrib.layers.xavier_initializer())
+        # compute a loss that penalizes wheights coming from one unit which have a sign
+        # opposite of the average
+        av_w = tf.sign(tf.reduce_mean(var, 1, keepdims=True))
+        # positive value for weights whose sign is opposite of sign of the mean
+        dale_loss = tf.reduce_sum(tf.maximum(-av_w * var, 0), name="dale_w_loss_"+name)
+        tf.add_to_collection(loss_collection, 1e-4*dale_loss)
     if w_decay is not None:
         weight_decay = tf.multiply(tf.nn.l2_loss(var), w_decay, name="l2_w_loss_"+name)
         tf.add_to_collection(loss_collection, weight_decay)
     return var
-
-
-def dale_constraint(weight_tensor: tf.Tensor) -> tf.Tensor:
-    n_units = weight_tensor.shape.as_list()[0]
-    n_inh = n_units // 2
-    w_inh = tf.clip_by_value(weight_tensor[:n_inh, :], -np.inf, 0)
-    w_exc = tf.clip_by_value(weight_tensor[n_inh:, :], 0, np.inf)
-    return tf.concat([w_inh, w_exc], 0)
 
 
 def create_bias_var(name, shape):
@@ -201,6 +197,8 @@ class NetworkModel:
         :param use_dale_constraint: If set to true, 1/2 of network units can only provide inhibition 1/2 only excitation
         """
         self.initialized = False
+        if use_dale_constraint:
+            warn("Current implementation of dale constraint hinders network training")
         self.use_dale_constraint = use_dale_constraint
         # set training defaults
         self.w_decay = 1e-4
