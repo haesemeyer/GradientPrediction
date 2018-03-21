@@ -43,6 +43,9 @@ if __name__ == "__main__":
     fast_off_like = 1
     slow_off_like = 3
 
+    # for clusters we identify in fish - their indices
+    int_off = 2
+
     # load activity clusters from file
     clfile = h5py.File("cluster_info.hdf5", "r")
     clust_ids = np.array(clfile["clust_ids"])
@@ -103,6 +106,58 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "fishlike_off_types.pdf", type="pdf")
 
+    # fourth panel - fish-response and location corresponding to integrating off type
+    # load fish activity data
+    dfile = h5py.File('H:/ClusterLocations_170327_clustByMaxCorr/datafile_170327.hdf5', 'r')
+    all_activity = np.array(dfile['all_activity'])
+    no_nan_aa = np.array(dfile['no_nan_aa'])
+    tf_centroids = np.array(dfile['tf_centroids'])[no_nan_aa, :]
+    frame_times = np.arange(all_activity.shape[1]) / 5
+    dfile.close()
+    dfile = h5py.File("stack_types.hdf5", 'r')
+    stack_types = np.array(dfile["stack_types"])[no_nan_aa]
+    dfile.close()
+    network_times = np.arange(all_cells.shape[0]) / GlobalDefs.frame_rate
+    int_off_regressor = np.mean(all_cells[:, clust_ids == int_off], 1)
+    int_off_regressor = np.interp(frame_times, network_times, int_off_regressor)
+    int_off_corrs = np.zeros(all_activity.shape[0])
+    for i, act in enumerate(all_activity):
+        int_off_corrs[i] = np.corrcoef(act, int_off_regressor)[0, 1]
+    int_off_fish = a.trial_average(all_activity[int_off_corrs > 0.6, :].T, 3).T
+    F0 = np.mean(int_off_fish[:, :30*5], 1, keepdims=True)
+    int_off_fish = (int_off_fish-F0) / F0
+    int_off_netw = a.trial_average(int_off_regressor[:, None], 3).ravel()
+    int_off_netw -= int_off_netw.min()
+    int_off_netw /= int_off_netw.max()
+    int_off_netw *= np.mean(int_off_fish, 0).max() - np.mean(int_off_fish, 0).min()
+    int_off_netw += np.mean(int_off_fish, 0).min()
+    fish_trial_time = np.arange(int_off_fish.shape[1]) / 5
+    fig, ax = pl.subplots()
+    sns.tsplot(int_off_fish, fish_trial_time, color='k', ax=ax)
+    ax.plot(fish_trial_time, int_off_netw, color=(76/255, 153/255, 153/255))
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Activity [dF/F]")
+    ax.set_xticks([0, 30, 60, 90, 120, 150])
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "integrating_off_type_activity.pdf", type="pdf")
+    # cell location dorsal view
+    int_off_cents = tf_centroids[np.logical_and(int_off_corrs > 0.6, stack_types == b"MAIN"), :]
+    rand_cents = tf_centroids[np.logical_and(np.random.rand(tf_centroids.shape[0]) < 0.002, stack_types == b"MAIN"), :]
+    fig, ax = pl.subplots()
+    ax.scatter(rand_cents[:, 0], rand_cents[:, 1], s=1, color='k', alpha=0.1)
+    ax.scatter(int_off_cents[:, 0], int_off_cents[:, 1], s=2, color=(76 / 255, 153 / 255, 153 / 255))
+    ax.set_aspect('equal', 'datalim')
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "integrating_off_type_top_view.pdf", type="pdf")
+    # cell location lateral view
+    fig, ax = pl.subplots()
+    ax.scatter(rand_cents[:, 1], rand_cents[:, 2], s=1, color='k', alpha=0.1)
+    ax.scatter(int_off_cents[:, 1], int_off_cents[:, 2], s=2, color=(76 / 255, 153 / 255, 153 / 255))
+    ax.set_aspect('equal', 'datalim')
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "integrating_off_type_side_view.pdf", type="pdf")
+
+    raise Exception("Skipping white noise computation to save time")
     # first panel - white noise analysis of generated behavior
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]
