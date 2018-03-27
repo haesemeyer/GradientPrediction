@@ -146,7 +146,7 @@ class SimulationStore(ModelStore):
             deb_dict = pickle.loads(db_pickle)
             return pos, deb_dict
         else:
-            pos, dbdict = self._run_sim(model_path, sim_type, network_state, True)
+            pos, dbdict = self._run_sim(model_path, sim_type, network_state, True, drop_list=drop_list)
             self._set_data(pos, *get_list, "pos")
             self._set_data(np.void(pickle.dumps(dbdict)), *get_list, "debug")
             return pos, dbdict

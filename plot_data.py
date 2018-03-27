@@ -359,6 +359,7 @@ def plot_fish_nonfish_analysis(sim_type="r"):
             pos_fish, db_fish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve", fish_remove)
             pos_nonfish, db_nonfish = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve",
                                                               nonfish_remove)
+        with SimulationStore(None, std, MoTypes(False)) as sim_store:  # don't store shuffle
             pos_shuff, db_shuff = sim_store.get_sim_debug(mpath(paths_512[net_id]), sim_type, "bfevolve", shuff_remove)
         bins = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
         bc, h_naive = bin_pos(pos_naive)
@@ -621,7 +622,7 @@ if __name__ == "__main__":
     ax.set_ylabel("Cluster size")
     ax.set_xlabel("Cluster number")
     sns.despine(fig, ax)
-
+    stop_error
     # plot white noise analysis of networks
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]

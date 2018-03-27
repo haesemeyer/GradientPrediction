@@ -133,7 +133,7 @@ if __name__ == "__main__":
     int_off_netw += np.mean(int_off_fish, 0).min()
     fish_trial_time = np.arange(int_off_fish.shape[1]) / 5
     fig, ax = pl.subplots()
-    sns.tsplot(int_off_fish, fish_trial_time, color='k', ax=ax)
+    sns.tsplot(int_off_fish, fish_trial_time, color='k', ax=ax, err_style=["ci_band", "unit_traces"])
     ax.plot(fish_trial_time, int_off_netw, color=(76/255, 153/255, 153/255))
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Activity [dF/F]")
