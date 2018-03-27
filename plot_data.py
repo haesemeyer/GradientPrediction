@@ -622,7 +622,7 @@ if __name__ == "__main__":
     ax.set_ylabel("Cluster size")
     ax.set_xlabel("Cluster number")
     sns.despine(fig, ax)
-    stop_error
+
     # plot white noise analysis of networks
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]
