@@ -591,16 +591,17 @@ class GpNetworkModel(NetworkModel):
         # mark network as not initialized
         self.initialized = False
 
-    def train(self, xbatch, ybatch, keep=0.5):
+    def train(self, xbatch, ybatch, keep=0.5, removal=None):
         """
         Runs a training step on the given batches
         :param xbatch: The input of the training batch
         :param ybatch: The true labels of the training batch
+        :param removal: Optional dictionary of which units in the network should be kept or dropped
         :param keep: The keep probability of each unit
         """
         self._check_init()
         with self._graph.as_default():
-            self._train_step.run(self._create_feed_dict(xbatch, ybatch, keep), self._session)
+            self._train_step.run(self._create_feed_dict(xbatch, ybatch, keep, removal), self._session)
 
     def get_squared_loss(self, xbatch, ybatch, keep=1) -> float:
         """
