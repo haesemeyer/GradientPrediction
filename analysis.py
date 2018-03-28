@@ -187,3 +187,21 @@ def trial_average(mat, n_trials):
         raise ValueError("Number of timepoints can't be divided into select number of trials")
     t_length = mat.shape[0] // n_trials
     return np.mean(mat.reshape((n_trials, t_length, mat.shape[1])), 0)
+
+
+def rank_error(y_real: np.ndarray, prediction: np.ndarray):
+    """
+    Compute prediction rank error
+    :param y_real: Matrix (samplesxfeatures) of real outputs
+    :param prediction: Matrix (samplesxfeatures) of network predictions
+    :return: Average rank error across all samples
+    """
+    nsamples = y_real.shape[0]
+    if prediction.shape[0] != nsamples:
+        raise ValueError("y_real and prediction need to have same number of samples")
+    err_sum = 0
+    for (y, p) in zip(y_real, prediction):
+        r_y = np.unique(y, return_inverse=True)[1]
+        r_p = np.unique(p, return_inverse=True)[1]
+        err_sum += np.sum(np.abs(r_y - r_p))
+    return err_sum / nsamples
