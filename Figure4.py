@@ -233,7 +233,7 @@ if __name__ == "__main__":
         pos = ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist)
         awc_rem[i, :] = a.bin_simulation(pos, bns, "r")
     fig, ax = pl.subplots()
-    sns.tsplot(evolved, centers, n_boot=1000, condition="Trained", color="k")
+    sns.tsplot(trained, centers, n_boot=1000, condition="Trained", color="k")
     sns.tsplot(afd_rem, centers, n_boot=1000, condition="AFD", color=plot_cols_ce[afd_like])
     sns.tsplot(awc_rem, centers, n_boot=1000, condition="AWC/AIY", color=plot_cols_ce[awc_like])
     ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.075], 'k--', lw=0.25)
