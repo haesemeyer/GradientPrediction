@@ -19,6 +19,7 @@ import h5py
 from global_defs import GlobalDefs
 from pandas import DataFrame
 import pickle
+from data_stores import SimulationStore
 
 
 # file definitions
@@ -232,7 +233,7 @@ if __name__ == "__main__":
         pos = ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist)
         awc_rem[i, :] = a.bin_simulation(pos, bns, "r")
     fig, ax = pl.subplots()
-    sns.tsplot(evolved, centers, n_boot=1000, condition="trained", color="k")
+    sns.tsplot(evolved, centers, n_boot=1000, condition="Trained", color="k")
     sns.tsplot(afd_rem, centers, n_boot=1000, condition="AFD", color=plot_cols_ce[afd_like])
     sns.tsplot(awc_rem, centers, n_boot=1000, condition="AWC/AIY", color=plot_cols_ce[awc_like])
     ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.075], 'k--', lw=0.25)
@@ -262,3 +263,29 @@ if __name__ == "__main__":
     ax.set_ylabel("Fraction within +/- 1C")
     ax.set_yticks([0, 0.25, 0.5, 0.75])
     fig.savefig(save_folder + "ce_type_ablations.pdf", type="pdf")
+
+    # panel 6: Gradient distribution after fish-like ablations and re-training
+    trained = np.empty((len(paths_512_zf), centers.size))
+    fl_ablated = np.empty_like(trained)
+    fl_retrained = np.empty_like(trained)
+    for i, p in enumerate(paths_512_zf):
+        mp = mpath(base_path_zf, p)
+        rt_path = mp + "/fl_retrain"
+        with SimulationStore(None, std_zf, MoTypes(False)) as sim_store:
+            pos = sim_store.get_sim_pos(mp, 'r', "trained")
+            trained[i, :] = a.bin_simulation(pos, bns, 'r')
+            dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [1, 2, 3, 4, 5])
+            pos = sim_store.get_sim_pos(mp, 'r', "trained", dlist)
+            fl_ablated[i, :] = a.bin_simulation(pos, bns, 'r')
+            pos = sim_store.get_sim_pos(rt_path, 'r', "trained", dlist)
+            fl_retrained[i, :] = a.bin_simulation(pos, bns, 'r')
+    fig, ax = pl.subplots()
+    sns.tsplot(trained, centers, n_boot=1000, condition="Trained", color="k")
+    sns.tsplot(fl_ablated, centers, n_boot=1000, condition="Ablated", color="C1")
+    sns.tsplot(fl_retrained, centers, n_boot=1000, condition="Retrained", color="C3")
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.05], 'k--', lw=0.25)
+    ax.legend()
+    ax.set_xlabel("Temperature [C]")
+    ax.set_ylabel("Proportion")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "zf_ablation_and_retrain_distribution.pdf", type="pdf")
