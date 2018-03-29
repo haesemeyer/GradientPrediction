@@ -168,12 +168,13 @@ class ActivityStore(ModelStore):
         self.std = std
         self.mo = mo
 
-    def _compute_cell_responses(self, model_dir, temp, network_id):
+    def _compute_cell_responses(self, model_dir, temp, network_id, drop_list=None):
         """
         Loads a model and computes the temperature response of all neurons returning response matrix
         :param model_dir: The directory of the network model
         :param temp: The temperature input to test on the network
         :param network_id: Numerical id of the network to later relate units back to a network
+        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
         :return:
             [0]: n-timepoints x m-neurons matrix of responses
             [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1, and unit index in row 2
@@ -184,7 +185,7 @@ class ActivityStore(ModelStore):
         # prepend lead-in to stimulus
         lead_in = np.full(gpn_trained.input_dims[2] - 1, np.mean(temp[:10]))
         temp = np.r_[lead_in, temp]
-        act_dict = gpn_trained.unit_stimulus_responses(temp, None, None, self.std)
+        act_dict = gpn_trained.unit_stimulus_responses(temp, None, None, self.std, det_drop=drop_list)
         if 't' in act_dict:
             activities = act_dict['t']
         else:
@@ -204,25 +205,28 @@ class ActivityStore(ModelStore):
             start += hs
         return activities, id_mat
 
-    def get_cell_responses(self, model_path: str, temperature: np.ndarray, network_id: int):
+    def get_cell_responses(self, model_path: str, temperature: np.ndarray, network_id: int, drop_list=None):
         """
         Obtain cell responses of all units in the given model for the given temperature stimulus
         :param model_path: The full path to the network model
         :param temperature: The temperature stimulus to present to the network
         :param network_id: An assigned numerical id of the network to later relate units back to a network
+        :param drop_list: Optional det_drop dictionary of lists of units to keep or drop
         :return:
             [0]: n-timepoints x m-neurons matrix of responses
             [1]: 3 x m-neurons matrix with network_id in row 0, layer index in row 1 and unit index in row 2
         """
         stim_hash = md5(temperature).hexdigest()
         mdir = self.model_dir_name(model_path)
-        activities = self._get_data(mdir, stim_hash, "activities")
-        id_mat = self._get_data(mdir, stim_hash, "id_mat")
+        getlist = [mdir, stim_hash] if drop_list is None else [mdir, stim_hash,
+                                                               md5(str(drop_list).encode()).hexdigest()]
+        activities = self._get_data(*getlist, "activities")
+        id_mat = self._get_data(*getlist, "id_mat")
         if activities is not None and id_mat is not None:
             # re-assign network id
             id_mat[0, :] = network_id
             return activities, id_mat
         activities, id_mat = self._compute_cell_responses(model_path, temperature, network_id)
-        self._set_data(activities, mdir, stim_hash, "activities")
-        self._set_data(id_mat, mdir, stim_hash, "id_mat")
+        self._set_data(activities, *getlist, "activities")
+        self._set_data(id_mat, *getlist, "id_mat")
         return activities, id_mat
