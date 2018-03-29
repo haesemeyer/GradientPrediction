@@ -647,13 +647,15 @@ class GpNetworkModel(NetworkModel):
                 rank_errors[i] = np.sum(np.abs(rank_real - rank_pred))
         return sq_errors, rank_errors
 
-    def unit_stimulus_responses(self, temperature, speed, angle, standardizations: GradientStandards) -> dict:
+    def unit_stimulus_responses(self, temperature, speed, angle, standardizations: GradientStandards,
+                                det_drop=None) -> dict:
         """
         Computes and returns the responses of each unit in the network in response to a stimulus
         :param temperature: The temperature stimulus in C (can be None for clamping to 0)
         :param speed: The speed input in pixels per timestep (can be None for clamping to 0)
         :param angle: The angle input in degrees per timestep (can be None for clamping to 0)
         :param standardizations: Object that provides mean and standard deviation for each input
+        :param det_drop: The deterministic keep/drop of each unit
         :return: Branch-wise dictionary of lists with n_hidden elements, each an array of time x n_units activations
         """
         self._check_init()
@@ -687,12 +689,12 @@ class GpNetworkModel(NetworkModel):
             model_in[:, 2, :, 0] = angle[ix]
             for b in self._branches:
                 if b == 'o':
-                    activity[b] = [self.predict(model_in)]
+                    activity[b] = [self.predict(model_in, det_drop=det_drop)]
                     continue
                 n_layers = self.n_layers_mixed if b == 'm' else self.n_layers_branch
                 for i in range(n_layers):
                     h = self._session.graph.get_tensor_by_name(self.cvn("HIDDEN", b, i)+":0")
-                    fd = self._create_feed_dict(model_in, keep=1.0)
+                    fd = self._create_feed_dict(model_in, keep=1.0, removal=det_drop)
                     if b in activity:
                         activity[b].append(h.eval(feed_dict=fd, session=self._session))
                     else:
