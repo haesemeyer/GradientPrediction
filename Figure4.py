@@ -51,7 +51,7 @@ if __name__ == "__main__":
                     6: (0.6, 0.6, 0.6), 7: (0.6, 0.6, 0.6), "naive": (0.0, 0.0, 0.0), "trained": (0.9, 0.9, 0.9)}
 
     plot_cols_ce = {0: (0.6, 0.6, 0.6), 1: pal[3], 2: (0.6, 0.6, 0.6), 3: (0.6, 0.6, 0.6), 4: (0.6, 0.6, 0.6),
-                    5: (0.6, 0.6, 0.6), 6: (0.6, 0.6, 0.6), 7: (0.6, 0.6, 0.6), "naive": (0.0, 0.0, 0.0),
+                    5: (0.6, 0.6, 0.6), 6: (0.6, 0.6, 0.6), 7: pal[1], "naive": (0.0, 0.0, 0.0),
                     "trained": (0.9, 0.9, 0.9)}
 
     # load activity clusters from file
@@ -215,6 +215,32 @@ if __name__ == "__main__":
     fig.savefig(save_folder + "zf_type_ablations.pdf", type="pdf")
 
     # panel 4: Full distribution of example type removals in C. elegans
+    # for worm-like clusters - their indices
+    afd_like = 1
+    awc_like = 7
+    trained = np.empty((len(paths_512_ce), centers.size))
+    afd_rem = np.empty_like(trained)
+    awc_rem = np.empty_like(trained)
+    for i, p in enumerate(paths_512_ce):
+        mp = mpath(base_path_ce, p)
+        pos_t = ana_ce.run_simulation(mp, "r", "trained")
+        trained[i, :] = a.bin_simulation(pos_t, bns, "r")
+        dlist = a.create_det_drop_list(i, clust_ids_ce, all_ids_ce, [afd_like])
+        pos = ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist)
+        afd_rem[i, :] = a.bin_simulation(pos, bns, "r")
+        dlist = a.create_det_drop_list(i, clust_ids_ce, all_ids_ce, [awc_like])
+        pos = ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist)
+        awc_rem[i, :] = a.bin_simulation(pos, bns, "r")
+    fig, ax = pl.subplots()
+    sns.tsplot(evolved, centers, n_boot=1000, condition="trained", color="k")
+    sns.tsplot(afd_rem, centers, n_boot=1000, condition="AFD", color=plot_cols_ce[afd_like])
+    sns.tsplot(awc_rem, centers, n_boot=1000, condition="AWC/AIY", color=plot_cols_ce[awc_like])
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.075], 'k--', lw=0.25)
+    ax.legend()
+    ax.set_xlabel("Temperature [C]")
+    ax.set_ylabel("Proportion")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "ce_rem_gradient_distribution.pdf", type="pdf")
 
     # panel 5: Aggregated type removals in C. elegans
     rem_dict = {i: [] for i in range(8)}
