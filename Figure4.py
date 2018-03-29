@@ -283,7 +283,7 @@ if __name__ == "__main__":
     sns.tsplot(trained, centers, n_boot=1000, condition="Trained", color="k")
     sns.tsplot(fl_ablated, centers, n_boot=1000, condition="Ablated", color="C1")
     sns.tsplot(fl_retrained, centers, n_boot=1000, condition="Retrained", color="C3")
-    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.05], 'k--', lw=0.25)
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.03], 'k--', lw=0.25)
     ax.legend()
     ax.set_xlabel("Temperature [C]")
     ax.set_ylabel("Proportion")
