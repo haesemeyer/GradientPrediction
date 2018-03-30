@@ -226,7 +226,7 @@ class ActivityStore(ModelStore):
             # re-assign network id
             id_mat[0, :] = network_id
             return activities, id_mat
-        activities, id_mat = self._compute_cell_responses(model_path, temperature, network_id)
+        activities, id_mat = self._compute_cell_responses(model_path, temperature, network_id, drop_list)
         self._set_data(activities, *getlist, "activities")
         self._set_data(id_mat, *getlist, "id_mat")
         return activities, id_mat
