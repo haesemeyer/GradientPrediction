@@ -570,6 +570,8 @@ class GpNetworkModel(NetworkModel):
                 self._n_branch_dense = []
             # retrieve training step
             self._train_step = graph.get_collection("train_op")[0]
+            # retrieve total loss tensor
+            self._total_loss = graph.get_tensor_by_name("total_loss:0")
             # set up squared loss calculation
             self._sq_loss = tf.losses.mean_squared_error(labels=self._y_, predictions=self._m_out)
         self.initialized = True
