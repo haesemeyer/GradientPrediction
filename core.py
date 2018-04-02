@@ -570,6 +570,8 @@ class GpNetworkModel(NetworkModel):
                 self._n_branch_dense = []
             # retrieve training step
             self._train_step = graph.get_collection("train_op")[0]
+            # retrieve total loss tensor
+            self._total_loss = graph.get_tensor_by_name("total_loss:0")
             # set up squared loss calculation
             self._sq_loss = tf.losses.mean_squared_error(labels=self._y_, predictions=self._m_out)
         self.initialized = True
@@ -602,6 +604,30 @@ class GpNetworkModel(NetworkModel):
         self._check_init()
         with self._graph.as_default():
             self._train_step.run(self._create_feed_dict(xbatch, ybatch, keep, removal), self._session)
+
+    def get_filtered_train(self, filter_fun: callable):
+        """
+        Creates a training procedure for this network using simple gradient descent only on variables
+        that pass filtering
+        :param filter_fun: A function that given a variable name returns true if this variable should be trained
+        :return: A closure with the same signature as the train method of the object but operating on filtered variables
+        """
+        def train_op(xbatch, ybatch, keep=0.5, removal=None):
+            nonlocal self
+            nonlocal train
+            self._check_init()
+            with self._graph.as_default():
+                train.run(self._create_feed_dict(xbatch, ybatch, keep, removal), self._session)
+
+        self._check_init()
+        with self._graph.as_default():
+            # use GradientDescentOptimizer here - otherwise we need to initialize additional
+            # variables before using - this is fine for most but problematic for Adam
+            # https://github.com/tensorflow/tensorflow/issues/8057
+            optimizer = tf.train.GradientDescentOptimizer(1e-4)
+            all_vars = self._session.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+            train = optimizer.minimize(self._total_loss, var_list=[v for v in all_vars if filter_fun(v.name)])
+        return train_op
 
     def get_squared_loss(self, xbatch, ybatch, keep=1) -> float:
         """
