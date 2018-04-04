@@ -31,7 +31,7 @@ def mpath(path):
     return base_path + path[:-1]  # need to remove trailing slash
 
 
-def retrain(m: ZfGpNetworkModel, save_path: str, droplist):
+def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix):
     def test():
         tbatch = testData.training_batch(TESTSIZE)
         pred = m.predict(tbatch[0], det_drop=droplist)
@@ -39,24 +39,26 @@ def retrain(m: ZfGpNetworkModel, save_path: str, droplist):
         print("Global step: {0}. Rank test error {1}".format(global_step, re))
         test_errors.append(re)
         test_steps.append(global_step)
+    # generate our non-t-branch training function
+    train_func = m.get_filtered_train(lambda n: "_t_" not in n)
     test_errors = []
     test_steps = []
     chk_file = save_path + "/retrain.ckpt"
-    epoch_1_size = trainingData_1.data_size // BATCHSIZE
-    epoch_2_size = trainingData_2.data_size // BATCHSIZE
+    epoch_1_size = train_list[td_ix[0]].data_size // BATCHSIZE
+    epoch_2_size = train_list[td_ix[1]].data_size // BATCHSIZE
     global_step = 0
     # train one epoch each
     while global_step < epoch_1_size:
         if global_step % EVAL_TEST_EVERY == 0:
             test()
-        data_batch = trainingData_1.training_batch(BATCHSIZE)
-        m.train(data_batch[0], data_batch[1], removal=droplist)
+        data_batch = train_list[td_ix[0]].training_batch(BATCHSIZE)
+        train_func(data_batch[0], data_batch[1], removal=droplist)
         global_step += 1
     while global_step < epoch_1_size + epoch_2_size:
         if global_step % EVAL_TEST_EVERY == 0:
             test()
-        data_batch = trainingData_2.training_batch(BATCHSIZE)
-        m.train(data_batch[0], data_batch[1], removal=droplist)
+        data_batch = train_list[td_ix[1]].training_batch(BATCHSIZE)
+        train_func(data_batch[0], data_batch[1], removal=droplist)
         global_step += 1
     sf = m.save_state(chk_file, global_step, True)
     print("Retrained model saved in file {0}.".format(sf))
@@ -68,14 +70,15 @@ def retrain(m: ZfGpNetworkModel, save_path: str, droplist):
 
 if __name__ == '__main__':
     # load training and test data
-    trainingData_1 = GradientData.load("gd_training_data.hdf5")
-    trainingData_2 = GradientData.load("gd_training_data_rev.hdf5")
-    trainingData_2.copy_normalization(trainingData_1)
+    tD_1 = GradientData.load("gd_training_data.hdf5")
+    tD_2 = GradientData.load("gd_training_data_rev.hdf5")
+    tD_2.copy_normalization(tD_1)
+    train_list = [tD_1, tD_2]
     testData = GradientData.load("gd_test_data_radial.hdf5")
     # enforce same scaling on testData as on trainingData
-    testData.copy_normalization(trainingData_1)
+    testData.copy_normalization(tD_1)
 
-    ana = a.Analyzer(MoTypes(False), trainingData_1.standards, None, "activity_store.hdf5")
+    ana = a.Analyzer(MoTypes(False), tD_1.standards, None, "activity_store.hdf5")
 
     # load cell unit ids and cluster ids
     dfile = h5py.File("stimFile.hdf5", 'r')
@@ -92,26 +95,32 @@ if __name__ == '__main__':
     clfile = h5py.File("cluster_info.hdf5", "r")
     clust_ids = np.array(clfile["clust_ids"])
     clfile.close()
+    train_ix = [0, 1]
     for i, p in enumerate(paths_512):
+        np.random.shuffle(train_ix)
         model_path = mpath(p)
         mdata = ModelData(model_path)
         # fish-like ablations
-        fl_folder = model_path+"/fl_retrain"
+        fl_folder = model_path+"/fl_nontbranch_retrain"
+        model = None
         if os.path.exists(fl_folder):
             print("Fish-like retrain folder on model {0} already exists. Skipping.".format(p))
-            continue
-        os.mkdir(fl_folder)
-        dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
-        model = ZfGpNetworkModel()
-        model.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-        retrain(model, fl_folder, dlist)
+        else:
+            os.mkdir(fl_folder)
+            dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
+            model = ZfGpNetworkModel()
+            model.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+            retrain(model, fl_folder, dlist, train_ix)
         # fish unlike ablations
-        fl_folder = model_path+"/nfl_retrain"
+        np.random.shuffle(train_ix)
+        fl_folder = model_path+"/nfl_nontbranch_retrain"
         if os.path.exists(fl_folder):
             print("Fish unlike folder on model {0} already exists. Skipping.".format(p))
             continue
         os.mkdir(fl_folder)
         dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_unlike)
-        model.clear()
+        if model is not None:
+            model.clear()
         model.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-        retrain(model, fl_folder, dlist)
+        retrain(model, fl_folder, dlist, train_ix)
+        model.clear()
