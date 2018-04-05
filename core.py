@@ -621,12 +621,15 @@ class GpNetworkModel(NetworkModel):
 
         self._check_init()
         with self._graph.as_default():
-            # use GradientDescentOptimizer here - otherwise we need to initialize additional
-            # variables before using - this is fine for most but problematic for Adam
-            # https://github.com/tensorflow/tensorflow/issues/8057
-            optimizer = tf.train.GradientDescentOptimizer(1e-4)
+            optimizer = tf.train.AdamOptimizer(1e-4, name="Addam")
             all_vars = self._session.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
             train = optimizer.minimize(self._total_loss, var_list=[v for v in all_vars if filter_fun(v.name)])
+            # initialize variables newly created for Adam
+            ini = tf.variables_initializer(
+                [v for v in tf.global_variables() if
+                 v.name.split(':')[0].encode() in set(self._session.run(tf.report_uninitialized_variables()))
+                 ])
+            self._session.run(ini)
         return train_op
 
     def get_squared_loss(self, xbatch, ybatch, keep=1) -> float:
