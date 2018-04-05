@@ -31,7 +31,7 @@ def mpath(path):
     return base_path + path[:-1]  # need to remove trailing slash
 
 
-def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix):
+def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix, filter_fun):
     def test():
         tbatch = testData.training_batch(TESTSIZE)
         pred = m.predict(tbatch[0], det_drop=droplist)
@@ -40,7 +40,7 @@ def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix):
         test_errors.append(re)
         test_steps.append(global_step)
     # generate our non-t-branch training function
-    train_func = m.get_filtered_train(lambda n: "_t_" not in n)
+    train_func = m.get_filtered_train(filter_fun)
     test_errors = []
     test_steps = []
     chk_file = save_path + "/retrain.ckpt"
@@ -101,26 +101,26 @@ if __name__ == '__main__':
         model_path = mpath(p)
         mdata = ModelData(model_path)
         # fish-like ablations
-        fl_folder = model_path+"/fl_nontbranch_retrain"
+        fl_folder = model_path+"/fl_tbranch_retrain"
         model = None
+        dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
         if os.path.exists(fl_folder):
-            print("Fish-like retrain folder on model {0} already exists. Skipping.".format(p))
+            print("Temperature branch retrain folder on model {0} already exists. Skipping.".format(p))
         else:
             os.mkdir(fl_folder)
-            dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
             model = ZfGpNetworkModel()
             model.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-            retrain(model, fl_folder, dlist, train_ix)
+            retrain(model, fl_folder, dlist, train_ix, lambda n: "_t_" in n)
         # fish unlike ablations
         np.random.shuffle(train_ix)
-        fl_folder = model_path+"/nfl_nontbranch_retrain"
+        fl_folder = model_path+"/fl_nontbranch_retrain"
         if os.path.exists(fl_folder):
-            print("Fish unlike folder on model {0} already exists. Skipping.".format(p))
+            print("Shared branch retrain folder on model {0} already exists. Skipping.".format(p))
             continue
         os.mkdir(fl_folder)
-        dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_unlike)
         if model is not None:
             model.clear()
+        model = ZfGpNetworkModel()
         model.load(mdata.ModelDefinition, mdata.LastCheckpoint)
-        retrain(model, fl_folder, dlist, train_ix)
+        retrain(model, fl_folder, dlist, train_ix, lambda n: "_m_" in n)
         model.clear()
