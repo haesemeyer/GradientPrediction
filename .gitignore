@@ -18,3 +18,4 @@ test*
 *.autosave
 *.hdf5
 model_data/
+*.dframe
