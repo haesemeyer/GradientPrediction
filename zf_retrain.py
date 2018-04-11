@@ -3,7 +3,7 @@
 # Licensed under the MIT license
 
 """
-Script to retrain all zebrafish networks after either ablating fish-like or fish-unlike cells
+Script to retrain all zebrafish networks after ablating fish-like cells
 """
 
 from core import GradientData, ModelData, ZfGpNetworkModel
@@ -100,7 +100,7 @@ if __name__ == '__main__':
         np.random.shuffle(train_ix)
         model_path = mpath(p)
         mdata = ModelData(model_path)
-        # fish-like ablations
+        # t-branch retrain
         fl_folder = model_path+"/fl_tbranch_retrain"
         model = None
         dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
@@ -111,7 +111,7 @@ if __name__ == '__main__':
             model = ZfGpNetworkModel()
             model.load(mdata.ModelDefinition, mdata.LastCheckpoint)
             retrain(model, fl_folder, dlist, train_ix, lambda n: "_t_" in n)
-        # fish unlike ablations
+        # m-branch retrain
         np.random.shuffle(train_ix)
         fl_folder = model_path+"/fl_nontbranch_retrain"
         if os.path.exists(fl_folder):
