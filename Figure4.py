@@ -106,8 +106,6 @@ def get_cluster_assignments(mt: MoTypes, model_dir: str, regressors, t_stimulus,
     mpool = get_pool()
     ares = {k: [mpool.apply_async(get_best_fit, (ad, regressors)) for ad in act_dict[k]] for k in ['t', 'm']}
     retval = {k: np.vstack([ar.get() for ar in ares[k]]) for k in ares}
-    # ares = {k: mpool.apply_async(get_best_fit, (np.hstack(act_dict[k]), regressors)) for k in ['t', 'm']}
-    # retval = {k: ares[k].get() for k in ['t', 'm']}
     return retval
 
 
