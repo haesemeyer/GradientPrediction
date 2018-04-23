@@ -157,6 +157,36 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "integrating_off_type_side_view.pdf", type="pdf")
 
+    # fifth panel - input connectivity into second layer of t branch
+    conn_mat = np.zeros((8, 8, len(paths_512)))
+    for i, p in enumerate(paths_512):
+        model_cids = clust_ids[all_ids[0, :] == i]
+        layers_ids = all_ids[1, :][all_ids[0, :] == i]
+        m_path = mpath(p)
+        mdata = c.ModelData(m_path)
+        gpn = mo.network_model()
+        gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+        conn_mat[:, :, i] = gpn.parse_layer_input_by_cluster('t', 1, model_cids[layers_ids == 0],
+                                                             model_cids[layers_ids == 1])
+    # reordered version of conn_mat based on known types
+    cm_order = [fast_on_like, slow_on_like, fast_off_like, slow_off_like, int_off, 0, 6, 7]
+    cm_reordered = conn_mat[:, cm_order, :]
+    cm_reordered = cm_reordered[cm_order, :, :]
+    m = np.mean(cm_reordered, 2)
+    s = np.std(cm_reordered, 2)
+    cross_0 = np.sign((m+s) * (m-s)) <= 0
+    m[cross_0] = 0
+    s[cross_0] = 0
+    fig, axes = pl.subplots(nrows=5, sharex=True, sharey=True)
+    for i in range(5):
+        axes[i].bar(np.arange(8), m[:, i], width=[.8]*5+[.3]*3)
+        axes[i].errorbar(np.arange(8), m[:, i], s[:, i], color='k', fmt='none')
+    axes[-1].set_xticks(np.arange(8))
+    axes[-1].set_xticklabels(["Fast ON", "Slow ON", "Fast OFF", "Slow OFF", "Int. OFF", "O", "O", "O"])
+    sns.despine(fig)
+    fig.tight_layout()
+    fig.savefig(save_folder + "avg_connectivity_weights.pdf", type="pdf")
+
     raise Exception("Skipping white noise computation to save time")
     # first panel - white noise analysis of generated behavior
     behav_kernels = {}
