@@ -752,6 +752,50 @@ class GpNetworkModel(NetworkModel):
             layer_out = tensor.eval(fd, session=self._session)
         return layer_out
 
+    def parse_layer_input_by_cluster(self, branch: str, layer_index: int, clid_upstream, clid_layer, id_exlude=-1):
+        """
+        Computes input to given unit clusters in a network layer as outputs of upstream layer clusters
+        :param branch: The branch of the layer
+        :param layer_index: The index of the layer
+        :param clid_upstream: The cluster ids of neurons feeding into this layer
+        :param clid_layer: The cluster ids of neurons in this layer
+        :param id_exlude: This cluster id will be excluded from calculations (usually -1 i.e. unclustered units)
+        :return: Connectivity matrix with clid_upstream ids as rows and clid_layer ids as columns with values
+            representing the average input contribution
+        """
+        if branch not in self._branches:
+            raise ValueError("Invalid branch. For this network has to be one of: {0}".format(self._branches))
+        if layer_index < 0:
+            raise ValueError("{0} is not a valid layer index".format(layer_index))
+        if branch == 'o' or layer_index == 0:
+            raise NotImplementedError("Connectivity analysis across branches is currently not implemented")
+        n_layers = self.n_units[0] if branch != 'm' else self.n_units[1]
+        if layer_index >= n_layers:
+            raise ValueError("layer_index {0} is not valid since branch {1} only has {2} layers.".format(layer_index,
+                                                                                                         branch,
+                                                                                                         n_layers))
+        # get weight matrix of the requested layer
+        with self._graph.as_default():
+            w_name = self.cvn("WEIGHT", branch, layer_index)
+            weight_mat = self._graph.get_tensor_by_name(w_name+":0").eval(session=self._session)
+        if clid_upstream.size != weight_mat.shape[0]:
+            raise ValueError("clid_upstream needs to have one element for each input unit")
+        if clid_layer.size != weight_mat.shape[1]:
+            raise ValueError("clid_layer needs to have one element for each unit in the layer of interest")
+        unq_up = np.unique(clid_upstream)
+        unq_this = np.unique(clid_layer)
+        if id_exlude is not None:
+            unq_up = unq_up[unq_up != id_exlude]
+            unq_this = unq_this[unq_this != id_exlude]
+        conn_mat = np.zeros((unq_up.size, unq_this.size))
+        for j, t in enumerate(unq_this):
+            cols = clid_layer == t
+            w = weight_mat[:, cols] / cols.sum()
+            for i, u in enumerate(unq_up):
+                rows = clid_upstream == u
+                conn_mat[i, j] = np.sum(w[rows, :]) / rows.sum()
+        return conn_mat
+
     @property
     def convolution_data(self):
         """
