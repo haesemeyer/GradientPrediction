@@ -30,7 +30,7 @@ paths_512_ce = [f + '/' for f in os.listdir(base_path_ce) if "_3m512_" in f]
 
 
 if __name__ == "__main__":
-    save_folder = "./DataFigures/Figure3/"
+    save_folder = "./DataFigures/FigureS3/"
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
     sns.reset_orig()
@@ -102,6 +102,11 @@ if __name__ == "__main__":
                 r = np.mean(all_cells_ce[:, clust_ids_ce == j], 1)
                 regs_ce[j] = r
                 clust_corr_mat[i, j] = np.corrcoef(reg_zf, r)[0, 1]**2
+
+    def norm(trace):
+        n = trace - trace.min()
+        return n / n.max()
+
     ccm_copy = clust_corr_mat.copy()
     for i in range(np.max(ccm_copy.shape)):
         ix = np.argmax(ccm_copy)
@@ -109,9 +114,11 @@ if __name__ == "__main__":
         ccm_copy[r, :] = 0
         ccm_copy[:, c] = 0
         fig, ax = pl.subplots()
-        sns.tsplot(a.trial_average(all_cells_zf[:, clust_ids_zf == r], 3).T, trial_time, color='k')
-        sns.tsplot(a.trial_average(all_cells_ce[:, clust_ids_ce == c], 3).T, trial_time, color='C1')
-        ax.set_xlabel("Activation [AU]")
-        ax.set_ylabel("Time [s]")
-        ax.set_title("R^2 = {0}".format(clust_corr_mat[r, c]))
+        ax.plot(trial_time, norm(np.mean(a.trial_average(all_cells_zf[:, clust_ids_zf == r], 3), 1)), color='k')
+        ax.plot(trial_time, norm(np.mean(a.trial_average(all_cells_ce[:, clust_ids_ce == c], 3), 1)), color='C1')
+        ax.set_ylabel("Normalized activation")
+        ax.set_xlabel("Time [s]")
+        ax.set_title("Zf {0} vs Ce {1}. R^2 = {2}".format(r, c, np.round(clust_corr_mat[r, c], 2)))
+        ax.set_xticks([0, 30, 60, 90, 120, 150])
         sns.despine(fig, ax)
+        fig.savefig(save_folder + "ZFish_C{0}_vs_CElegans_C{1}.pdf".format(r, c), type="pdf")
