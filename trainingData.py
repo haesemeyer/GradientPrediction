@@ -30,7 +30,7 @@ class CircGradientTrainer(TrainingSimulation):
         self.t_min = t_min
         self.t_max = t_max
 
-    def temperature(self, x, y):
+    def temperature(self, x, y, a=0):
         """
         Returns the temperature at the given positions
         """
@@ -67,7 +67,7 @@ class LinGradientTrainer(TrainingSimulation):
         self.t_min = t_min
         self.t_max = t_max
 
-    def temperature(self, x, y):
+    def temperature(self, x, y, a=0):
         """
         Returns the temperature at the given positions
         """

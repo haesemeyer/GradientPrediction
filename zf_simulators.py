@@ -44,7 +44,7 @@ class TemperatureArena:
         self._bout = np.empty((self.blen, 3), np.float32)
         self._pos_cache = np.empty((1, 3), np.float32)
 
-    def temperature(self, x, y):
+    def temperature(self, x, y, a=0):
         """
         Returns the temperature at the given positions
         """
@@ -192,7 +192,8 @@ class TrainingSimulation(TemperatureArena):
                 continue
             # obtain inputs at given step
             inputs[step-start, 0, :] = self.temperature(sim_pos[step-history+1:step+1, 0],
-                                                        sim_pos[step-history+1:step+1, 1])
+                                                        sim_pos[step-history+1:step+1, 1],
+                                                        sim_pos[step-history+1:step+1, 2])
             spd = np.sqrt(np.sum(np.diff(sim_pos[step-history:step+1, 0:2], axis=0)**2, 1))
             inputs[step-start, 1, :] = spd
             inputs[step-start, 2, :] = np.diff(sim_pos[step-history:step+1, 2], axis=0)
@@ -200,7 +201,7 @@ class TrainingSimulation(TemperatureArena):
             # PRED_WINDOW steps into the future to obtain final temperature as output
             for i, b in enumerate(btypes):
                 fpos = self.sim_forward(PRED_WINDOW, sim_pos[step, :], b)[-1, :]
-                outputs[step-start, i] = self.temperature(fpos[0], fpos[1])
+                outputs[step-start, i] = self.temperature(fpos[0], fpos[1], fpos[2])
         # create gradient data object on all non-moving positions
         is_moving = is_moving[start:]
         assert is_moving.size == inputs.shape[0]
@@ -425,7 +426,7 @@ class CircleGradSimulation(ModelSimulation):
         # set range of starting positions to more sensible default
         self.maxstart = self.radius
 
-    def temperature(self, x, y):
+    def temperature(self, x, y, a=0):
         """
         Returns the temperature at the given positions
         """
@@ -471,7 +472,7 @@ class LinearGradientSimulation(ModelSimulation):
         # set range of starting positions to more sensible default
         self.maxstart = max(self.xmax, self.ymax)
 
-    def temperature(self, x, y):
+    def temperature(self, x, y, a=0):
         """
         Returns the temperature at the given positions
         """
