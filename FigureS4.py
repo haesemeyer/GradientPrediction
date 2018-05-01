@@ -60,12 +60,18 @@ if __name__ == "__main__":
     sns.reset_orig()
     mpl.rcParams['pdf.fonttype'] = 42
 
+    std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
+
     std_ce = c.GradientData.load_standards("ce_gd_training_data.hdf5")
     ana_ce = a.Analyzer(MoTypes(True), std_ce, "ce_sim_store.hdf5", "ce_activity_store.hdf5")
+    ana_zf = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", "activity_store.hdf5")
 
     # load cluster data from file
     clfile = h5py.File("ce_cluster_info.hdf5", "r")
     clust_ids_ce = np.array(clfile["clust_ids"])
+    clfile.close()
+    clfile = h5py.File("cluster_info.hdf5", "r")
+    clust_ids_zf = np.array(clfile["clust_ids"])
     clfile.close()
 
     # load and interpolate temperature stimulus
@@ -85,6 +91,12 @@ if __name__ == "__main__":
         all_cells_ce.append(cell_res)
     all_ids_ce = np.hstack(all_ids_ce)
     all_cells_ce = np.hstack(all_cells_ce)
+
+    all_ids_zf = []
+    for i, p in enumerate(paths_512_zf):
+        cell_res, ids = ana_zf.temperature_activity(mpath(base_path_zf, p), temperature, i)
+        all_ids_zf.append(ids)
+    all_ids_zf = np.hstack(all_ids_zf)
 
     # panel X: Zebrafish Rank error progress during re-training
     re_t_branch = []
@@ -117,6 +129,40 @@ if __name__ == "__main__":
     sns.tsplot(re_nont_branch, test_times, ci=68, color="C3", condition="Mixed branch only")
     sns.despine(fig, ax)
     fig.savefig(save_folder + "ce_fish_retrain_rank_errors.pdf", type="pdf")
+
+    # panel X - white noise analysis after fish-like ablations to show that non-fish types modulate behavior
+    mo = MoTypes(False)
+    behav_kernels = {}
+    k_names = ["stay", "straight", "left", "right"]
+    for i, p in enumerate(paths_512_zf):
+        m_path = mpath(base_path_zf, p)
+        mdata_wn = c.ModelData(m_path)
+        gpn_wn = mo.network_model()
+        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
+        wna = mo.wn_sim(std_zf, gpn_wn, stim_std=2)
+        wna.switch_mean = 5
+        wna.switch_std = 1
+        wna.remove = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [1, 2, 3, 4, 5])
+        kernels = wna.compute_behavior_kernels(10000000)
+        for j, n in enumerate(k_names):
+            if n in behav_kernels:
+                behav_kernels[n].append(kernels[j])
+            else:
+                behav_kernels[n] = [kernels[j]]
+    kernel_time = np.linspace(-4, 1, behav_kernels['straight'][0].size)
+    for n in k_names:
+        behav_kernels[n] = np.vstack(behav_kernels[n])
+    plot_kernels = {"straight": behav_kernels["straight"], "turn": (behav_kernels["left"] + behav_kernels["right"])/2}
+    fig, ax = pl.subplots()
+    for i, n in enumerate(plot_kernels):
+        sns.tsplot(plot_kernels[n], kernel_time, n_boot=1000, color="C{0}".format(i), ax=ax, condition=n)
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.1, 0.2], 'k--', lw=0.25)
+    ax.set_ylabel("Filter kernel")
+    ax.set_xlabel("Time around bout [s]")
+    ax.legend()
+    sns.despine(fig, ax)
+    fig.savefig(save_folder+"nonfish_only_white_noise_kernels.pdf", type="pdf")
 
     # for each removal and retrain of C elegans data compute gradient distributions
     bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
