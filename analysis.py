@@ -88,6 +88,22 @@ def bin_simulation(pos, bins: np.ndarray, simdir="r"):
     return h
 
 
+def bin_simulation_pt(pos, bins: np.ndarray):
+    """
+    Bin simulation result facing angles
+    :param pos: Position array obtained from running simulation
+    :param bins: Array containing bin edges
+    :return: Relative occupancy
+    """
+    quantpos = MoTypes(False).pt_sim.facing_angle(pos[:, 0], pos[:, 1], pos[:, 2])
+    # remap angles from -pi to pi
+    quantpos[quantpos > np.pi] = quantpos[quantpos > np.pi] - 2*np.pi
+    quantpos[quantpos < -np.pi] = quantpos[quantpos < -np.pi] + 2*np.pi
+    h = np.histogram(quantpos, bins)[0].astype(float)
+    h = h / h.sum()
+    return h
+
+
 def temp_convert(distances, sim_type):
     """
     Converts center or origin distances into temperature values according to our standard simulation types
