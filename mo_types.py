@@ -49,3 +49,10 @@ class MoTypes:
             raise NotImplementedError("C elegans white noise simulation not implemented yet")
         else:
             return zf_simulators.WhiteNoiseSimulation
+
+    @property
+    def pt_sim(self):
+        if self.c_elegans:
+            raise NotImplementedError("C elegans phototaxis simulation not implemented")
+        else:
+            return zf_simulators.PhototaxisSimulation
