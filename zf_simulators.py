@@ -496,6 +496,160 @@ class LinearGradientSimulation(ModelSimulation):
         return self.xmax
 
 
+class PhototaxisSimulation(TemperatureArena):
+    """
+    Class to perform model guided simulation that attempts to keep
+    facing a light source in a circular arena
+    """
+    def __init__(self, model: ZfGpNetworkModel, tdata, radius):
+        """
+        Creates a new ModelSimulation
+        :param model: The network model to run the simulation
+        :param tdata: Training data or related object to supply scaling information
+        :param radius: The arena radius
+        """
+        super().__init__()
+        self.model = model
+        self.temp_mean = tdata.temp_mean
+        self.temp_std = tdata.temp_std
+        self.disp_mean = tdata.disp_mean
+        self.disp_std = tdata.disp_std
+        self.ang_mean = tdata.ang_mean
+        self.ang_std = tdata.ang_std
+        self.radius = radius
+        self.maxstart = self.radius
+        self.btypes = ["N", "S", "L", "R"]
+        # all starting positions have to be within bounds but x and y coordinates are further limted to +/- maxstart
+        self.maxstart = 10
+        # optionally holds a list of vectors to suppress activation in units that should be "ablated"
+        self.remove = None
+
+    def get_start_pos(self):
+        x = np.inf
+        y = np.inf
+        while self.out_of_bounds(x, y):
+            x = np.random.randint(-self.maxstart, self.maxstart, 1)
+            y = np.random.randint(-self.maxstart, self.maxstart, 1)
+        a = np.random.rand() * 2 * np.pi
+        return np.array([x, y, a])
+
+    def select_behavior(self, ranks):
+        """
+        Given a ranking of choices returns the bout type identifier to perform
+        """
+        decider = self._uni_cash.next_rand()
+        if decider < 0.5:
+            return self.btypes[ranks[0]]
+        elif decider < 0.75:
+            return self.btypes[ranks[1]]
+        elif decider < 0.875:
+            return self.btypes[ranks[2]]
+        else:
+            return self.btypes[ranks[3]]
+
+    def out_of_bounds(self, x, y):
+        """
+        Detects whether the given x-y position is out of the arena
+        :param x: The x position
+        :param y: The y position
+        :return: True if the given position is outside the arena, false otherwise
+        """
+        # circular arena, compute radial position of point and compare to arena radius
+        r = np.sqrt(x**2 + y**2)
+        return r > self.radius
+
+    @property
+    def max_pos(self):
+        return self.radius
+
+    @staticmethod
+    def facing_angle(x, y, a=0):
+        """
+        Returns the angle to the central light-source at the given positions
+        in a coordinate system centered on the object, facing in the heading direction
+        """
+        # calculate vector *to* source which is at coordinate 0/0
+        vec_x = -x
+        vec_y = -y
+        # calculate heading unit vector
+        head_x = np.cos(a)
+        head_y = np.sin(a)
+        # calculate and return angular position of source
+        return np.arctan2(vec_y, vec_x) - np.arctan2(head_y, head_x)
+
+    def run_simulation(self, nsteps, debug=False):
+        """
+        Runs gradient simulation using the neural network model
+        :param nsteps: The number of timesteps to perform
+        :param debug: If set to true function will return debug output
+        :return:
+            [0] nsims long list of nsteps x 3 position arrays (xpos, ypos, angle)
+            [1] Returned if debug=True. Dictionary with vector of temps and matrix of predictions at each position
+        """
+        debug_dict = {}
+        t_out = np.zeros(4)  # for debug purposes to run true outcome simulations forward
+        if debug:
+            # debug dict only contains information for timesteps which were select for possible movement!
+            debug_dict["curr_angle"] = np.full(nsteps, np.nan)  # the current facing angle at this position
+            debug_dict["pred_angle"] = np.full((nsteps, 4), np.nan)  # the network predicted angle for each move
+            debug_dict["sel_behav"] = np.zeros(nsteps, dtype="U1")  # the actually selected move
+            debug_dict["true_angle"] = np.full((nsteps, 4), np.nan)  # the facing angle if each move is simulated
+        history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
+        burn_period = history * 2
+        start = history + 1
+        pos = np.full((nsteps + burn_period, 3), np.nan)
+        pos[:start + 1, :] = self.get_start_pos()[None, :]
+        # run simulation
+        step = start
+        model_in = np.zeros((1, 3, history, 1))
+        # overall bout frequency at ~1 Hz
+        p_eval = self.p_move
+        while step < nsteps + burn_period:
+            if self._uni_cash.next_rand() > p_eval:
+                pos[step, :] = pos[step-1, :]
+                step += 1
+                continue
+            model_in[0, 0, :, 0] = (self.facing_angle(pos[step - history:step, 0], pos[step - history:step, 1],
+                                                      pos[step - history:step, 2]) - self.temp_mean) / self.temp_std
+            spd = np.sqrt(np.sum(np.diff(pos[step - history - 1:step, 0:2], axis=0) ** 2, 1))
+            model_in[0, 1, :, 0] = (spd - self.disp_mean) / self.disp_std
+            dang = np.diff(pos[step - history - 1:step, 2], axis=0)
+            model_in[0, 2, :, 0] = (dang - self.ang_mean) / self.ang_std
+            model_out = self.model.predict(model_in, 1.0, self.remove).ravel()
+            # we rank the movements such that the highest rank [position 0] is given to the behavior that would
+            # result in the smallest deviation from facing the light source - however this isn't neccesarily the
+            # smallest angle - 10 degrees should be ranked worse then 359
+            pred_angle = model_out * self.temp_std + self.temp_mean
+            pred_angle %= (2*np.pi)  # ensure that no angles over 2pi remain
+            # recode angles to smallest possible turn towards 0
+            pred_angle[pred_angle > np.pi] = 2*np.pi - pred_angle[pred_angle > np.pi]
+            pred_angle[pred_angle < -np.pi] = -2*np.pi - pred_angle[pred_angle < -np.pi]
+            behav_ranks = np.argsort(np.abs(pred_angle))
+            bt = self.select_behavior(behav_ranks)
+            if debug:
+                dbpos = step - burn_period
+                debug_dict["curr_angle"][dbpos] = model_in[0, 0, -1, 0] * self.temp_std + self.temp_mean
+                debug_dict["pred_angle"][dbpos, :] = model_out * self.temp_std + self.temp_mean
+                debug_dict["sel_behav"][dbpos] = bt
+                for i, b in enumerate(self.btypes):
+                    fpos = self.sim_forward(PRED_WINDOW, pos[step-1, :], b)[-1, :]
+                    t_out[i] = self.facing_angle(fpos[0], fpos[1], fpos[2])
+                debug_dict["true_angle"][dbpos, :] = t_out
+            if bt == "N":
+                pos[step, :] = pos[step - 1, :]
+                step += 1
+                continue
+            traj = self.get_bout_trajectory(pos[step-1, :], bt)
+            if step + self.blen <= nsteps + burn_period:
+                pos[step:step + self.blen, :] = traj
+            else:
+                pos[step:, :] = traj[:pos[step:, :].shape[0], :]
+            step += self.blen
+        if debug:
+            return pos[burn_period:, :], debug_dict
+        return pos[burn_period:, :]
+
+
 class WhiteNoiseSimulation(TemperatureArena):
     """
     Class to perform white noise analysis of network models
