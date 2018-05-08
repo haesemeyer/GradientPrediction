@@ -19,6 +19,7 @@ from data_stores import SimulationStore
 from mo_types import MoTypes
 from Figure4 import mpath
 from sklearn.decomposition import PCA
+from scipy.signal import convolve
 
 
 # file definitions
@@ -95,6 +96,20 @@ if __name__ == "__main__":
     all_ids_ce = np.hstack(all_ids_ce)
     all_cells_ce = np.hstack(all_cells_ce)
 
+    # convolve activity with nuclear gcamp calcium kernel
+    tau_on = 1.4  # seconds
+    tau_on *= GlobalDefs.frame_rate  # in frames
+    tau_off = 2  # seconds
+    tau_off *= GlobalDefs.frame_rate  # in frames
+    kframes = np.arange(10 * GlobalDefs.frame_rate)  # 10 s long kernel
+    kernel = 2 ** (-kframes / tau_off) * (1 - 2 ** (-kframes / tau_on))
+    kernel = kernel / kernel.sum()
+    # convolve with our kernel
+    for i in range(all_cells_zf.shape[1]):
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+    for i in range(all_cells_ce.shape[1]):
+        all_cells_ce[:, i] = convolve(all_cells_ce[:, i], kernel, method='full')[:all_cells_ce.shape[0]]
+
     # first panel - rank error progression over training
     test_time = test_loss(paths_512_ce[0])[0]
     test_512 = np.vstack([test_loss(lp)[2] for lp in paths_512_ce])
@@ -133,7 +148,45 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder+"gradient_distribution.pdf", type="pdf")
 
-    # third panel - comparison of cell response location in PCA space
+    # third panel - responses of C elegans neurons to temperature step
+    afd_like = 1
+    awc_like = 7
+    step_min = 23
+    step_max = 27
+    temp_step = np.zeros(temperature.size // 3)
+    temp_step[:temp_step.size//5] = step_min
+    temp_step[temp_step.size*4//5:] = step_max
+    ramp = temp_step[temp_step.size//5:temp_step.size*4//5]
+    ramp = np.arange(ramp.size)/ramp.size*(step_max-step_min) + step_min
+    temp_step[temp_step.size//5:temp_step.size*4//5] = ramp
+    cells_ce_step = []
+    for i, p in enumerate(paths_512_ce):
+        cell_res, ids = ana_ce.temperature_activity(mpath(base_path_ce, p), temp_step, i)
+        cells_ce_step.append(cell_res)
+    cells_ce_step = np.hstack(cells_ce_step)
+    for i in range(cells_ce_step.shape[1]):
+        cells_ce_step[:, i] = convolve(cells_ce_step[:, i], kernel, method='full')[:cells_ce_step.shape[0]]
+    afd_data = cells_ce_step[:, clust_ids_ce == afd_like].T
+    awc_data = cells_ce_step[:, clust_ids_ce == awc_like].T
+    trial_time = np.arange(cells_ce_step.shape[0]) / GlobalDefs.frame_rate
+    fig, ax = pl.subplots()
+    sns.tsplot(afd_data, trial_time, ax=ax, color="C3")
+    sns.tsplot(awc_data, trial_time, ax=ax, color="C1")
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Activation [AU]")
+    ax.set_xticks([0, 30, 60, 90, 120, 150])
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "ce_step_responses.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    ax.plot(trial_time, temp_step, 'k')
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Temperature [C]")
+    ax.set_xticks([0, 30, 60, 90, 120, 150])
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "step_stimulus.pdf", type="pdf")
+
+
+    # fourth panel - comparison of cell response location in PCA space
     all_cells = np.hstack((a.trial_average(all_cells_zf, 3), a.trial_average(all_cells_ce, 3))).T
     max_vals = np.max(all_cells, 1, keepdims=True)
     max_vals[max_vals == 0] = 1  # these cells do not show any response
