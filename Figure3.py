@@ -275,6 +275,7 @@ if __name__ == "__main__":
             pos = sim_store.get_sim_pos(mp, 'r', "trained")
             trained[i, :] = a.bin_simulation(pos, bns, 'r')
             dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [1, 2, 3, 4, 5])
+            n_fish_rem = 512-dlist['t'][0].sum() + 512-dlist['t'][1].sum()
             pos = sim_store.get_sim_pos(mp, 'r', "trained", dlist)
             fl_ablated[i, :] = a.bin_simulation(pos, bns, 'r')
             pos = sim_store.get_sim_pos(rt_path_t, 'r', "trained", dlist)
@@ -282,6 +283,20 @@ if __name__ == "__main__":
             pos = sim_store.get_sim_pos(rt_path_nont, 'r', "trained", dlist)
             fl_retrained_nont[i, :] = a.bin_simulation(pos, bns, 'r')
             dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [0, 6, 7])
+            # add random removals to remove the same number of units as in fish-like
+            n_nfish_rem = 512-dlist['t'][0].sum() + 512-dlist['t'][1].sum()
+            rand_rem = n_fish_rem - n_nfish_rem
+            if rand_rem > 0:
+                rem_1 = int(rand_rem // 2)
+                rem_2 = int(rand_rem - rem_1)
+                to_rem_1 = np.ones(int(dlist['t'][0].sum()))
+                to_rem_1[:rem_1] = 0
+                np.random.shuffle(to_rem_1)
+                dlist['t'][0][dlist['t'][0] == 1] = to_rem_1
+                to_rem_2 = np.ones(int(dlist['t'][1].sum()))
+                to_rem_2[:rem_2] = 0
+                np.random.shuffle(to_rem_2)
+                dlist['t'][1][dlist['t'][1] == 1] = to_rem_2
             pos = sim_store.get_sim_pos(mp, 'r', "trained", dlist)
             nfl_ablated[i, :] = a.bin_simulation(pos, bns, 'r')
 
