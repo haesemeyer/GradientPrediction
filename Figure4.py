@@ -212,8 +212,6 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "Phototaxis_navigation.pdf", type="pdf")
 
-    # TODO: Panel 3 - Spatial navigation distribution
-
     # Panel 4 - PCA space comparison of zfish gradient and phototaxis responses
     all_cells = np.hstack((a.trial_average(all_cells_zf, 3), a.trial_average(all_cells_pt, 3))).T
     max_vals = np.max(all_cells, 1, keepdims=True)
@@ -360,7 +358,7 @@ if __name__ == "__main__":
     pal = sns.color_palette()  # the default matplotlib color cycle
     plot_cols_ce = {0: (0.6, 0.6, 0.6), 1: pal[3], 2: (0.6, 0.6, 0.6), 3: (0.6, 0.6, 0.6), 4: (0.6, 0.6, 0.6),
                     5: (0.6, 0.6, 0.6), 6: (0.6, 0.6, 0.6), 7: pal[1], "naive": (0.0, 0.0, 0.0),
-                    "trained": (0.9, 0.9, 0.9)}
+                    "trained": (0.9, 0.9, 0.9), -1: (0.6, 0.6, 0.6)}
     # for worm-like clusters - their indices
     afd_like = 1
     awc_like = 7
@@ -390,9 +388,10 @@ if __name__ == "__main__":
 
     # Panel 11: Aggregated type removals in C. elegans
     rem_dict = {i: [] for i in range(8)}
+    rem_dict[-1] = []
     rem_dict["naive"] = []
     rem_dict["trained"] = []
-    plot_order = ["naive", "trained", 1, 7, 0, 2, 3, 4, 5, 6]
+    plot_order = ["naive", "trained", 1, 7, 0, 2, 3, 4, 5, 6, -1]
     plot_cols = [plot_cols_ce[k] for k in plot_order]
     for i, p in enumerate(paths_512_ce):
         mp = mpath(base_path_ce, p)
@@ -401,6 +400,8 @@ if __name__ == "__main__":
         for cc in range(8):
             dlist = a.create_det_drop_list(i, clust_ids_ce, all_ids_ce, [cc])
             rem_dict[cc].append(a.preferred_fraction(ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist), "r"))
+        dlist = a.create_det_drop_list(i, clust_ids_ce, all_ids_ce, [-1])
+        rem_dict[-1].append(a.preferred_fraction(ana_ce.run_simulation(mp, "r", "trained", drop_list=dlist), "r"))
     rem_ce = DataFrame(rem_dict)
     fig, ax = pl.subplots()
     sns.barplot(data=rem_ce, order=plot_order, palette=plot_cols, ci=68)

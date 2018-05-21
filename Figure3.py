@@ -129,7 +129,8 @@ if __name__ == "__main__":
     # for fish network clusters - their indices matched to plot colors to match Figure 2
     pal = sns.color_palette()  # the default matplotlib color cycle
     plot_cols_zf = {0: (0.6, 0.6, 0.6), 1: pal[2], 2: (102/255, 45/255, 145/255), 3: pal[0], 4: pal[3], 5: pal[1],
-                    6: (0.6, 0.6, 0.6), 7: (0.6, 0.6, 0.6), "naive": (0.0, 0.0, 0.0), "trained": (0.9, 0.9, 0.9)}
+                    6: (0.6, 0.6, 0.6), 7: (0.6, 0.6, 0.6), "naive": (0.0, 0.0, 0.0), "trained": (0.9, 0.9, 0.9),
+                    -1: (0.6, 0.6, 0.6)}
 
     # load activity clusters from file
     clfile = h5py.File("cluster_info.hdf5", "r")
@@ -242,9 +243,10 @@ if __name__ == "__main__":
 
     # panel 3: Aggregated type removals in zebrafish
     rem_dict = {i: [] for i in range(8)}
+    rem_dict[-1] = []
     rem_dict["naive"] = []
     rem_dict["trained"] = []
-    plot_order = ["naive", "trained", 4, 5, 1, 3, 2, 0, 6, 7]
+    plot_order = ["naive", "trained", 4, 5, 1, 3, 2, 0, 6, 7, -1]
     plot_cols = [plot_cols_zf[k] for k in plot_order]
     for i, p in enumerate(paths_512_zf):
         mp = mpath(base_path_zf, p)
@@ -253,6 +255,9 @@ if __name__ == "__main__":
         for cc in range(8):
             dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [cc])
             rem_dict[cc].append(a.preferred_fraction(ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist), "r"))
+        # unassigned
+        dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [-1])
+        rem_dict[-1].append(a.preferred_fraction(ana_zf.run_simulation(mp, "r", "bfevolve", drop_list=dlist), "r"))
     rem_zf = DataFrame(rem_dict)
     fig, ax = pl.subplots()
     sns.barplot(data=rem_zf, order=plot_order, palette=plot_cols, ci=68)
