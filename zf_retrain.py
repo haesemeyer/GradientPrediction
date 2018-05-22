@@ -35,13 +35,16 @@ def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix, filter_fun):
     def test():
         tbatch = testData.training_batch(TESTSIZE)
         pred = m.predict(tbatch[0], det_drop=droplist)
+        sq = m.get_squared_loss(tbatch[0], tbatch[1])
         re = a.rank_error(tbatch[1], pred)
         print("Global step: {0}. Rank test error {1}".format(global_step, re))
         test_errors.append(re)
         test_steps.append(global_step)
+        test_losses.append(sq)
     # generate our non-t-branch training function
     train_func = m.get_filtered_train(filter_fun)
     test_errors = []
+    test_losses = []
     test_steps = []
     chk_file = save_path + "/retrain.ckpt"
     epoch_1_size = train_list[td_ix[0]].data_size // BATCHSIZE
@@ -64,6 +67,7 @@ def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix, filter_fun):
     print("Retrained model saved in file {0}.".format(sf))
     error_file = h5py.File(save_path+"/losses.hdf5", "x")
     error_file.create_dataset("test_rank_errors", data=np.array(test_errors))
+    error_file.create_dataset("test_losses", data=np.array(test_losses))
     error_file.create_dataset("test_eval", data=np.array(test_steps))
     error_file.close()
 
@@ -101,7 +105,7 @@ if __name__ == '__main__':
         model_path = mpath(p)
         mdata = ModelData(model_path)
         # t-branch retrain
-        fl_folder = model_path+"/fl_tbranch_retrain"
+        fl_folder = model_path+"/bk_fl_tbranch_retrain"
         model = None
         dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
         if os.path.exists(fl_folder):
@@ -113,7 +117,7 @@ if __name__ == '__main__':
             retrain(model, fl_folder, dlist, train_ix, lambda n: "_t_" in n)
         # m-branch retrain
         np.random.shuffle(train_ix)
-        fl_folder = model_path+"/fl_nontbranch_retrain"
+        fl_folder = model_path+"/bk_fl_nontbranch_retrain"
         if os.path.exists(fl_folder):
             print("Shared branch retrain folder on model {0} already exists. Skipping.".format(p))
             continue

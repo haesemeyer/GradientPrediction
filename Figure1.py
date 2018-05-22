@@ -73,26 +73,25 @@ if __name__ == "__main__":
 
     std = c.GradientData.load_standards("gd_training_data.hdf5")
 
-    # first panel - rank error progression over training
+    # first panel - log squared error progression over training
     test_time = test_loss(paths_512[0])[0]
-    test_256 = np.vstack([test_loss(lp)[2] for lp in paths_256])
-    test_512 = np.vstack([test_loss(lp)[2] for lp in paths_512])
-    test_1024 = np.vstack([test_loss(lp)[2] for lp in paths_1024])
+    test_256 = np.vstack([test_loss(lp)[1] for lp in paths_256])
+    test_512 = np.vstack([test_loss(lp)[1] for lp in paths_512])
+    test_1024 = np.vstack([test_loss(lp)[1] for lp in paths_1024])
     fig, ax = pl.subplots()
-    sns.tsplot(test_256, test_time, ax=ax, color="C2", n_boot=1000, condition="256 HU")
-    sns.tsplot(test_512, test_time, ax=ax, color="C1", n_boot=1000, condition="512 HU")
-    sns.tsplot(test_1024, test_time, ax=ax, color="C3", n_boot=1000, condition="1024 HU")
+    sns.tsplot(np.log10(test_256), test_time, ax=ax, color="C2", n_boot=1000, condition="256 HU")
+    sns.tsplot(np.log10(test_512), test_time, ax=ax, color="C1", n_boot=1000, condition="512 HU")
+    sns.tsplot(np.log10(test_1024), test_time, ax=ax, color="C3", n_boot=1000, condition="1024 HU")
     epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
     for e in epoch_times:
-        ax.plot([e, e], [0, 5], 'k--', lw=0.25)
-    ax.plot([0, test_time.max()], [5, 5], 'k--', lw=0.25)
-    ax.set_ylabel("Ranking error")
+        ax.plot([e, e], [-1.2, .4], 'k--', lw=0.25)
+    ax.set_ylabel("log(Squared test error)")
     ax.set_xlabel("Training step")
     ax.set_xlim(-10000)
     ax.set_xticks([0, 250000, 500000, 750000])
     ax.legend()
     sns.despine(fig, ax)
-    fig.savefig(save_folder+"test_rank_errors.pdf", type="pdf")
+    fig.savefig(save_folder+"test_errors.pdf", type="pdf")
 
     # second panel - population average temperature error progression during evolution
     errors = np.empty((len(paths_512), 50))

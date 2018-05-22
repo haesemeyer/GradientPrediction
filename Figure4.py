@@ -116,6 +116,38 @@ if __name__ == "__main__":
     sns.reset_orig()
     mpl.rcParams['pdf.fonttype'] = 42
 
+    # Panel 1 - test error during phototaxis training
+    test_time = test_loss(base_path_pt, paths_512_pt[0])[0]
+    test_512 = np.vstack([test_loss(base_path_pt, lp)[1] for lp in paths_512_pt])
+    fig, ax = pl.subplots()
+    sns.tsplot(np.log10(test_512), test_time, ax=ax, color="C1", n_boot=1000, condition="512 HU")
+    epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
+    for e in epoch_times:
+        ax.plot([e, e], [-.5, .1], 'k--', lw=0.25)
+    ax.set_ylabel("log(Squared test error)")
+    ax.set_xlabel("Training step")
+    ax.set_xlim(-10000)
+    ax.set_xticks([0, 100000, 200000, 300000, 400000])
+    ax.legend()
+    sns.despine(fig, ax)
+    fig.savefig(save_folder+"pt_test_errors.pdf", type="pdf")
+
+    # Panel 5: Test error during C. elegans model training
+    test_time = test_loss(base_path_ce, paths_512_ce[0])[0]
+    test_512 = np.vstack([test_loss(base_path_ce, lp)[1] for lp in paths_512_ce])
+    fig, ax = pl.subplots()
+    sns.tsplot(np.log10(test_512), test_time, ax=ax, color="C1", n_boot=1000, condition="512 HU")
+    epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
+    for e in epoch_times:
+        ax.plot([e, e], [-1.2, .4], 'k--', lw=0.25)
+    ax.set_ylabel("log(Squared test error)")
+    ax.set_xlabel("Training step")
+    ax.set_xlim(-10000)
+    ax.set_xticks([0, 250000, 500000])
+    ax.legend()
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "ce_test_errors.pdf", type="pdf")
+
     std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
     ana_zf = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", "activity_store.hdf5")
     std_ce = c.GradientData.load_standards("ce_gd_training_data.hdf5")
@@ -173,23 +205,6 @@ if __name__ == "__main__":
     for i in range(all_cells_pt.shape[1]):
         all_cells_pt[:, i] = convolve(all_cells_pt[:, i], kernel, method='full')[:all_cells_pt.shape[0]]
 
-    # Panel 1 - rank error during phototaxis training
-    test_time = test_loss(base_path_pt, paths_512_pt[0])[0]
-    test_512 = np.vstack([test_loss(base_path_pt, lp)[2] for lp in paths_512_pt])
-    fig, ax = pl.subplots()
-    sns.tsplot(test_512, test_time, ax=ax, color="C1", n_boot=1000, condition="512 HU")
-    epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
-    for e in epoch_times:
-        ax.plot([e, e], [0, 5], 'k--', lw=0.25)
-    ax.plot([0, test_time.max()], [5, 5], 'k--', lw=0.25)
-    ax.set_ylabel("Ranking error")
-    ax.set_xlabel("Training step")
-    ax.set_xlim(-10000)
-    ax.set_xticks([0, 100000, 200000, 300000, 400000])
-    ax.legend()
-    sns.despine(fig, ax)
-    fig.savefig(save_folder+"pt_test_rank_errors.pdf", type="pdf")
-
     # Panel 2 - naive and trained phototaxis performance
     all_n = []
     t_512 = []
@@ -224,23 +239,6 @@ if __name__ == "__main__":
     coords = pca.transform(all_cells)
     for i in range(pca.n_components):
         plot_pc(i, coords, species_id, pca.explained_variance_, "zf_pt")
-
-    # Panel 5: Rank error during C. elegans model training
-    test_time = test_loss(base_path_ce, paths_512_ce[0])[0]
-    test_512 = np.vstack([test_loss(base_path_ce, lp)[2] for lp in paths_512_ce])
-    fig, ax = pl.subplots()
-    sns.tsplot(test_512, test_time, ax=ax, color="C1", n_boot=1000, condition="512 HU")
-    epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
-    for e in epoch_times:
-        ax.plot([e, e], [0, 8], 'k--', lw=0.25)
-    ax.plot([0, test_time.max()], [8, 8], 'k--', lw=0.25)
-    ax.set_ylabel("Ranking error")
-    ax.set_xlabel("Training step")
-    ax.set_xlim(-10000)
-    ax.set_xticks([0, 250000, 500000])
-    ax.legend()
-    sns.despine(fig, ax)
-    fig.savefig(save_folder + "ce_test_rank_errors.pdf", type="pdf")
 
     # Panel 6: Gradient navigation performance of C elegans model
     bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
