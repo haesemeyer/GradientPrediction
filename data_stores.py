@@ -64,7 +64,7 @@ class SimulationStore(ModelStore):
         val_types = ['r', 'l']
         if sim_type not in val_types:
             raise ValueError("sim_type {0} is not valid has to be one of {1}".format(sim_type, val_types))
-        val_states = ['naive', 'trained', 'ideal', 'bfevolve']
+        val_states = ['naive', 'trained', 'ideal', 'bfevolve', 'partevolve']
         if network_state not in val_states:
             raise ValueError("network_state {0} is not valid has to be one of {1}".format(network_state, val_states))
 
@@ -96,6 +96,12 @@ class SimulationStore(ModelStore):
             ev_path = model_path + '/evolve/generation_weights.npy'
             weights = np.load(ev_path)
             w = np.mean(weights[-1, :, :], 0)
+            sim.bf_weights = w
+        elif network_state == "partevolve":
+            # get weights after partial evolution - generation 7 is within initial decline
+            ev_path = model_path + '/evolve/generation_weights.npy'
+            weights = np.load(ev_path)
+            w = np.mean(weights[7, :, :], 0)
             sim.bf_weights = w
         if network_state == "ideal":
             return sim.run_ideal(GlobalDefs.n_steps)

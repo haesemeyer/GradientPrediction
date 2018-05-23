@@ -58,10 +58,12 @@ def compute_gradient_bout_frequency(model_path, drop_list=None):
 
     with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
         pos_fixed = sim_store.get_sim_pos(model_path, "r", "trained", drop_list)
+        pos_part = sim_store.get_sim_pos(model_path, "r", "partevolve", drop_list)
         pos_var = sim_store.get_sim_pos(model_path, "r", "bfevolve", drop_list)
     bf_fixed, bc = bout_freq(pos_fixed)
+    bf_p, bc = bout_freq(pos_part)
     bf_var, bc = bout_freq(pos_var)
-    return bc, bf_fixed, bf_var
+    return bc, bf_fixed, bf_p, bf_var
 
 
 if __name__ == "__main__":
@@ -108,16 +110,19 @@ if __name__ == "__main__":
 
     # third panel - bout frequency modulation with and without evolution
     bf_trained = np.empty((len(paths_512), 5))
+    bf_part = np.empty_like(bf_trained)
     bf_evolved = np.empty_like(bf_trained)
     centers = None
     for i, p in enumerate(paths_512):
-        centers, t, e = compute_gradient_bout_frequency(p)
+        centers, t, part, e = compute_gradient_bout_frequency(mpath(p))
         bf_trained[i, :] = t
+        bf_part[i, :] = part
         bf_evolved[i, :] = e
     centers = a.temp_convert(centers, "r")
     fig, ax = pl.subplots()
-    sns.tsplot(bf_trained, centers, n_boot=1000, color="C1", err_style="ci_band", condition="Trained")
-    sns.tsplot(bf_evolved, centers, n_boot=1000, color="C0", err_style="ci_band", condition="p(Swim) control")
+    sns.tsplot(bf_trained, centers, n_boot=1000, color="C1", err_style="ci_band", condition="Generation 0")
+    sns.tsplot(bf_part, centers, n_boot=1000, color=(.5, .5, .5), err_style="ci_band", condition="Generation 8")
+    sns.tsplot(bf_evolved, centers, n_boot=1000, color="C0", err_style="ci_band", condition="Generation 50")
     ax.set_xlim(23, 36)
     ax.set_xticks([25, 30, 35])
     ax.set_yticks([0.5, 0.75, 1, 1.25])
