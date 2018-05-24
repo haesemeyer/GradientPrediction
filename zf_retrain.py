@@ -35,9 +35,9 @@ def retrain(m: ZfGpNetworkModel, save_path: str, droplist, td_ix, filter_fun):
     def test():
         tbatch = testData.training_batch(TESTSIZE)
         pred = m.predict(tbatch[0], det_drop=droplist)
-        sq = m.get_squared_loss(tbatch[0], tbatch[1])
+        sq = np.sum((pred-tbatch[1])**2) / TESTSIZE
         re = a.rank_error(tbatch[1], pred)
-        print("Global step: {0}. Rank test error {1}".format(global_step, re))
+        print("Step: {0}. Log sq error {2}. Rank error {1}".format(global_step, re, np.log10(sq)))
         test_errors.append(re)
         test_steps.append(global_step)
         test_losses.append(sq)
@@ -105,7 +105,7 @@ if __name__ == '__main__':
         model_path = mpath(p)
         mdata = ModelData(model_path)
         # t-branch retrain
-        fl_folder = model_path+"/bk_fl_tbranch_retrain"
+        fl_folder = model_path+"/fl_tbranch_retrain"
         model = None
         dlist = a.create_det_drop_list(i, clust_ids, all_ids, fish_like)
         if os.path.exists(fl_folder):
@@ -117,7 +117,7 @@ if __name__ == '__main__':
             retrain(model, fl_folder, dlist, train_ix, lambda n: "_t_" in n)
         # m-branch retrain
         np.random.shuffle(train_ix)
-        fl_folder = model_path+"/bk_fl_nontbranch_retrain"
+        fl_folder = model_path+"/fl_nontbranch_retrain"
         if os.path.exists(fl_folder):
             print("Shared branch retrain folder on model {0} already exists. Skipping.".format(p))
             continue
