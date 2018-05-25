@@ -127,18 +127,16 @@ if __name__ == "__main__":
     F0 = np.mean(int_off_fish[:, :30*5], 1, keepdims=True)
     int_off_fish = (int_off_fish-F0) / F0
     int_off_netw = a.trial_average(int_off_regressor[:, None], 3).ravel()
-    int_off_netw -= int_off_netw.min()
-    int_off_netw /= int_off_netw.max()
-    int_off_netw *= np.mean(int_off_fish, 0).max() - np.mean(int_off_fish, 0).min()
-    int_off_netw += np.mean(int_off_fish, 0).min()
     fish_trial_time = np.arange(int_off_fish.shape[1]) / 5
-    fig, ax = pl.subplots()
-    sns.tsplot(int_off_fish, fish_trial_time, color='k', ax=ax, err_style="ci_band")
-    ax.plot(fish_trial_time, int_off_netw, color=(76/255, 153/255, 153/255))
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Activity [dF/F]")
-    ax.set_xticks([0, 30, 60, 90, 120, 150])
-    sns.despine(fig, ax)
+    fig, (ax_net, ax_fish) = pl.subplots(nrows=2, sharex=True)
+    ax_net.plot(fish_trial_time, int_off_netw, color=(76 / 255, 153 / 255, 153 / 255))
+    sns.tsplot(int_off_fish, fish_trial_time, color=(76 / 255, 153 / 255, 153 / 255), ax=ax_fish, err_style="ci_band")
+    ax_fish.set_xlabel("Time [s]")
+    ax_fish.set_ylabel("Activity [dF/F]")
+    ax_net.set_ylabel("Activation")
+    ax_fish.set_xticks([0, 30, 60, 90, 120, 150])
+    ax_net.set_xticks([0, 30, 60, 90, 120, 150])
+    sns.despine(fig)
     fig.savefig(save_folder + "integrating_off_type_activity.pdf", type="pdf")
     # cell location dorsal view
     int_off_cents = tf_centroids[np.logical_and(int_off_corrs > 0.6, stack_types == b"MAIN"), :]
