@@ -108,10 +108,10 @@ def get_cluster_assignments(mt: MoTypes, model_dir: str, regressors, t_stimulus,
 def test_loss_zf_retrain(path):
     fname = base_path_zf + path + "fl_nontbranch_retrain/losses.hdf5"
     lossfile = h5py.File(fname, "r")
-    rank_errors_non_t = np.array(lossfile["test_rank_errors"])
+    rank_errors_non_t = np.array(lossfile["test_losses"])
     fname = base_path_zf + path + "fl_tbranch_retrain/losses.hdf5"
     lossfile = h5py.File(fname, "r")
-    rank_errors_t = np.array(lossfile["test_rank_errors"])
+    rank_errors_t = np.array(lossfile["test_losses"])
     timepoints = np.array(lossfile["test_eval"])
     return timepoints, rank_errors_t, rank_errors_non_t
 
@@ -276,7 +276,7 @@ if __name__ == "__main__":
         mp = mpath(base_path_zf, p)
         rt_path_nont = mp + "/fl_nontbranch_retrain"
         rt_path_t = mp + "/fl_tbranch_retrain"
-        with SimulationStore(None, std_zf, MoTypes(False)) as sim_store:
+        with SimulationStore("zf_retrain_simStore.hdf5", std_zf, MoTypes(False)) as sim_store:
             pos = sim_store.get_sim_pos(mp, 'r', "trained")
             trained[i, :] = a.bin_simulation(pos, bns, 'r')
             dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [1, 2, 3, 4, 5])
@@ -317,7 +317,7 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "zf_fish_nonfish_ablation_distribution.pdf", type="pdf")
 
-    # panel 5: Rank errors during re-training
+    # panel 5: Test losses during re-training
     re_t_branch = []
     re_nont_branch = []
     test_times = None
@@ -328,10 +328,13 @@ if __name__ == "__main__":
     re_t_branch = np.vstack(re_t_branch)
     re_nont_branch = np.vstack(re_nont_branch)
     fig, ax = pl.subplots()
-    sns.tsplot(re_t_branch, test_times, ci=68, color="C3", condition="Temperature branch only")
-    sns.tsplot(re_nont_branch, test_times, ci=68, color="C0", condition="Mixed branch only")
+    sns.tsplot(np.log10(re_t_branch), test_times, ci=68, color="C3", condition="Temperature branch only", ax=ax)
+    sns.tsplot(np.log10(re_nont_branch), test_times, ci=68, color="C0", condition="Mixed branch only", ax=ax)
+    ax.set_xticks([0, 25000, 50000, 75000])
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("log(Squared test error)")
     sns.despine(fig, ax)
-    fig.savefig(save_folder + "zf_fish_retrain_rank_errors.pdf", type="pdf")
+    fig.savefig(save_folder + "zf_fish_retrain_test_losses.pdf", type="pdf")
 
     # panel 6: Retraining after ablating all fish types
     fig, ax = pl.subplots()
@@ -359,7 +362,7 @@ if __name__ == "__main__":
         mp = mpath(base_path_zf, p)
         rt_path_nont = mp + "/fl_nontbranch_retrain"
         rt_path_t = mp + "/fl_tbranch_retrain"
-        with ActivityStore(None, std_zf, MoTypes(False)) as act_store:
+        with ActivityStore("zf_retrain_act.hdf5", std_zf, MoTypes(False)) as act_store:
             clusters_trained = get_cluster_assignments(MoTypes(False), mp, regs_zf, temperature, std_zf, None)
             dlist = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [1, 2, 3, 4, 5])
             clusters_ablated = get_cluster_assignments(MoTypes(False), mp, regs_zf, temperature, std_zf, dlist)
