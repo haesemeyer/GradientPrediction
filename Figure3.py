@@ -385,18 +385,17 @@ if __name__ == "__main__":
                         ctype = "Unassigned"
                     else:
                         ctype = "Non fish"
-                    type_fractions["cell type"] += [ctype]*4
-                    type_fractions["branch"] += [br]*4
-                    type_fractions["network_id"] += [i]*4
-                    type_fractions["state"].append("Trained")
-                    type_fractions["fraction"].append(np.sum(clusters_trained[br] == cnum)/clusters_trained[br].size)
-                    type_fractions["state"].append("Ablated")
-                    type_fractions["fraction"].append(np.sum(clusters_ablated[br] == cnum) / clusters_ablated[br].size)
+                    type_fractions["cell type"] += [ctype]*2
+                    type_fractions["branch"] += [br]*2
+                    type_fractions["network_id"] += [i]*2
+                    train = np.sum(clusters_trained[br] == cnum)/clusters_trained[br].size
+                    ablated = np.sum(clusters_ablated[br] == cnum) / clusters_ablated[br].size
+                    retr_t = np.sum(clusters_retr_t[br] == cnum) / clusters_retr_t[br].size
+                    retr_m = np.sum(clusters_retr_nont[br] == cnum) / clusters_retr_nont[br].size
                     type_fractions["state"].append("Retrained T")
-                    type_fractions["fraction"].append(np.sum(clusters_retr_t[br] == cnum) / clusters_retr_t[br].size)
+                    type_fractions["fraction"].append((retr_t - ablated) / train)
                     type_fractions["state"].append("Retrained M")
-                    type_fractions["fraction"].append(np.sum(clusters_retr_nont[br] == cnum) /
-                                                      clusters_retr_nont[br].size)
+                    type_fractions["fraction"].append((retr_m - ablated) / train)
     df_typefrac = DataFrame(type_fractions)
     order = ["Fast ON", "Slow ON", "Fast OFF", "Slow OFF", "Int. OFF", "Non fish", "Unassigned"]
     # panel 9: type fractions after ablation and re-training in temperature branch
