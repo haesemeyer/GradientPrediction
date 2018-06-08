@@ -21,6 +21,7 @@ from pandas import DataFrame
 import pickle
 from data_stores import SimulationStore, ActivityStore
 from Figure4 import mpath
+from scipy.signal import convolve
 
 
 # file definitions
@@ -53,11 +54,77 @@ if __name__ == "__main__":
 
     # get activity data
     all_ids_zf = []
+    all_cells_zf = []
     for i, p in enumerate(paths_512_zf):
         cell_res, ids = ana_zf.temperature_activity(mpath(base_path_zf, p), temperature, i)
         all_ids_zf.append(ids)
+        all_cells_zf.append(cell_res)
     all_ids_zf = np.hstack(all_ids_zf)
+    all_cells_zf = np.hstack(all_cells_zf)
 
+    # convolve activity with nuclear gcamp calcium kernel
+    tau_on = 1.4  # seconds
+    tau_on *= GlobalDefs.frame_rate  # in frames
+    tau_off = 2  # seconds
+    tau_off *= GlobalDefs.frame_rate  # in frames
+    kframes = np.arange(10 * GlobalDefs.frame_rate)  # 10 s long kernel
+    kernel = 2 ** (-kframes / tau_off) * (1 - 2 ** (-kframes / tau_on))
+    kernel = kernel / kernel.sum()
+    # convolve with our kernel
+    for i in range(all_cells_zf.shape[1]):
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+
+    # plot colors
+    pal = sns.color_palette()  # the default matplotlib color cycle
+    plot_cols_zf = {0: (0.6, 0.6, 0.6), 1: pal[2], 2: (102 / 255, 45 / 255, 145 / 255), 3: pal[0], 4: pal[3], 5: pal[1],
+                    6: pal[5], 7: (76 / 255, 153 / 255, 153 / 255), -1: (0.6, 0.6, 0.6)}
+
+    # panel - all cluster activities, sorted into ON and OFF types
+    n_regs = np.unique(clust_ids_zf).size - 1
+    cluster_acts = np.zeros((all_cells_zf.shape[0] // 3, n_regs))
+    for i in range(n_regs):
+        cluster_acts[:, i] = np.mean(a.trial_average(all_cells_zf[:, clust_ids_zf == i], 3), 1)
+    on_count = 0
+    off_count = 0
+    fig, (axes_on, axes_off) = pl.subplots(ncols=2, nrows=2, sharey=True, sharex=True)
+    time = np.arange(cluster_acts.shape[0]) / GlobalDefs.frame_rate
+    for i in range(n_regs):
+        act = cluster_acts[:, i]
+        if np.corrcoef(act, temperature[:act.size])[0, 1] < 0:
+            ax_off = axes_off[0] if off_count < 2 else axes_off[1]
+            ax_off.plot(time, cluster_acts[:, i], color=plot_cols_zf[i])
+            off_count += 1
+        else:
+            ax_on = axes_on[0] if on_count < 2 else axes_on[1]
+            ax_on.plot(time, cluster_acts[:, i], color=plot_cols_zf[i])
+            on_count += 1
+    axes_off[0].set_xticks([0, 30, 60, 90, 120, 150])
+    axes_off[1].set_xticks([0, 30, 60, 90, 120, 150])
+    axes_off[0].set_xlabel("Time [s]")
+    axes_off[1].set_xlabel("Time [s]")
+    axes_on[0].set_ylabel("Cluster average activation")
+    axes_off[0].set_ylabel("Cluster average activation")
+    sns.despine()
+    fig.tight_layout()
+    fig.savefig(save_folder + "zf_all_cluster_averages.pdf", type="pdf")
+
+    # panel - average type counts in temperature branch for each cluster
+    cl_type_d = {"Fraction": [], "net_id": [], "Cluster ID": []}
+    for i in range(len(paths_512_zf)):
+        net_clust_ids = clust_ids_zf[all_ids_zf[0, :] == i]
+        for j in range(-1, n_regs):
+            cl_type_d["Fraction"].append(np.sum(net_clust_ids == j) / 1024)
+            cl_type_d["net_id"].append(i)
+            cl_type_d["Cluster ID"].append(j)
+    cl_type_df = DataFrame(cl_type_d)
+    fig, ax = pl.subplots()
+    sns.barplot("Cluster ID", "Fraction", data=cl_type_df, order=list(range(n_regs)) + [-1], ci=68, ax=ax,
+                palette=plot_cols_zf)
+    ax.set_yticks([0, 0.05, 0.1, 0.15])
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "zf_all_cluster_counts.pdf", type="pdf")
+
+    raise Exception("Skipping white noise analysis to save time")
     # panel 1 - white noise analysis on naive networks
     mo = MoTypes(False)
     behav_kernels = {}
