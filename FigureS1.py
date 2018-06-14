@@ -30,39 +30,48 @@ if __name__ == "__main__":
         os.makedirs(save_folder)
     sns.reset_orig()
     mpl.rcParams['pdf.fonttype'] = 42
-    std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
 
-    # for each complete branch removal compute gradient distributions
-    bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
-    centers = a.temp_convert(bns[:-1] + np.diff(bns), "r")
-    evolved = np.empty((len(paths_512_zf), centers.size))
-    t_ablated = np.empty_like(evolved)
-    s_ablated = np.empty_like(evolved)
-    a_ablated = np.empty_like(evolved)
-    dlist_all_t = {'t': [np.zeros(512), np.zeros(512)]}
-    dlist_all_s = {'s': [np.zeros(512), np.zeros(512)]}
-    dlist_all_a = {'a': [np.zeros(512), np.zeros(512)]}
-    for i, p in enumerate(paths_512_zf):
-        mp = mpath(base_path_zf, p)
-        with SimulationStore("zf_full_branch_abl.hdf5", std_zf, MoTypes(False)) as sim_store:
-            pos = sim_store.get_sim_pos(mp, 'r', "trained")
-            evolved[i, :] = a.bin_simulation(pos, bns, 'r')
-            pos = sim_store.get_sim_pos(mp, 'r', "trained", dlist_all_t)
-            t_ablated[i, :] = a.bin_simulation(pos, bns, 'r')
-            pos = sim_store.get_sim_pos(mp, 'r', "trained", dlist_all_s)
-            s_ablated[i, :] = a.bin_simulation(pos, bns, 'r')
-            pos = sim_store.get_sim_pos(mp, 'r', "trained", dlist_all_a)
-            a_ablated[i, :] = a.bin_simulation(pos, bns, "r")
-
-    # Panel: Full branch removal gradient navigation
+    # Example evolution on one network
+    p = mpath(base_path_zf, paths_512_zf[0])
+    evol_p = p + "/evolve/"
+    errors = np.load(evol_p + "generation_errors.npy")
+    weights = np.load(evol_p + "generation_weights.npy")
+    # Panel: Error progression
     fig, ax = pl.subplots()
-    sns.tsplot(evolved, centers, n_boot=1000, condition="trained", color="k")
-    sns.tsplot(t_ablated, centers, n_boot=1000, condition="t branch", color="C3")
-    sns.tsplot(s_ablated, centers, n_boot=1000, condition="s branch", color="C0")
-    sns.tsplot(a_ablated, centers, n_boot=1000, condition="a branch", color="C2")
-    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.03], 'k--', lw=0.25)
-    ax.legend()
-    ax.set_xlabel("Temperature [C]")
-    ax.set_ylabel("Proportion")
+    ax.errorbar(np.arange(50), np.mean(errors, 1), np.std(errors, 1), linestyle='None', marker='o', color="C1")
+    ax.errorbar(49, np.mean(errors, 1)[49], np.std(errors, 1)[49], linestyle='None', marker='o', color="C0")
+    ax.errorbar(7, np.mean(errors, 1)[7], np.std(errors, 1)[7], linestyle='None', marker='o', color=(.5, .5, .5))
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Navigation error [C]")
     sns.despine(fig, ax)
-    fig.savefig(save_folder + "zf_branch_rem_gradient_distribution.pdf", type="pdf")
+    fig.savefig(save_folder + "network_0_evolveError.pdf", type="pdf")
+    # Panel: Pairwise weight correlations
+    corr_0 = []
+    corr_7 = []
+    corr_49 = []
+    for i in range(512):
+        for j in range(512):
+            if i < j:
+                corr_0.append(np.corrcoef(weights[0, i, :], weights[0, j, :])[0, 1])
+                corr_7.append(np.corrcoef(weights[7, i, :], weights[7, j, :])[0, 1])
+                corr_49.append(np.corrcoef(weights[49, i, :], weights[49, j, :])[0, 1])
+    fig, ax = pl.subplots()
+    sns.kdeplot(corr_0, ax=ax, color="C1")
+    sns.kdeplot(corr_7, ax=ax, color=(.5, .5, .5))
+    sns.kdeplot(corr_49, ax=ax, color="C0")
+    ax.set_xlabel("Pairwise weight vector correlations")
+    ax.set_ylabel("Density")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "network_0_evolveWeightCorrs.pdf", type="pdf")
+    # Panel: Example weight matrices
+    fig, axes = pl.subplots(ncols=4)
+    sns.heatmap(weights[0, :, :], vmin=-3, vmax=3, center=0, cbar=False, cmap="RdBu_r", ax=axes[0], xticklabels=False,
+                yticklabels=False, rasterized=True)
+    sns.heatmap(weights[7, :, :], vmin=-3, vmax=3, center=0, cbar=False, cmap="RdBu_r", ax=axes[1], xticklabels=False,
+                yticklabels=False, rasterized=True)
+    sns.heatmap(weights[49, :, :], vmin=-3, vmax=3, center=0, cbar=True, cmap="RdBu_r", ax=axes[2], xticklabels=False,
+                yticklabels=False, cbar_ax=axes[3], rasterized=True)
+    axes[0].set_ylabel("Generation weight vectors")
+    for a in axes[:-1]:
+        a.set_xlabel("Weights")
+    fig.savefig(save_folder + "network_0_evolveWeights.pdf", type="pdf")
