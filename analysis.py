@@ -221,3 +221,43 @@ def rank_error(y_real: np.ndarray, prediction: np.ndarray):
         r_p = np.unique(p, return_inverse=True)[1]
         err_sum += np.sum(np.abs(r_y - r_p))
     return err_sum / nsamples
+
+
+def behavior_by_temperature(db_dict: dict, all_temps: np.ndarray, bins: np.ndarray):
+    """
+    Computes frequency of behavior selection by temperature
+    :param db_dict: Debug dictionary created during simulation run
+    :param all_temps: For each simulation position the occupied temperature
+    :param bins: The bin-edges for dividing the temperature space
+    :return: A dictionary with behaviors as keys and probability in each bin as values
+    """
+    selector = np.logical_and(db_dict["sel_behav"] != '', db_dict["sel_behav"] != 'N')
+    behavior_types = np.unique(db_dict["sel_behav"][selector])
+    occupancy_counts = np.histogram(all_temps, bins)[0].astype(np.float)
+    result = {k: np.zeros(bins.size-1) for k in behavior_types}
+    for behav in behavior_types:
+        b_temps = db_dict["curr_temp"][db_dict["sel_behav"] == behav]
+        result[behav] = np.histogram(b_temps, bins)[0].astype(np.float) / occupancy_counts
+    return result
+
+
+def behavior_by_delta_temp(db_dict: dict, bins: np.ndarray):
+    """
+    Computes frequency of behavior by delta-temperature achieved during the preceding bout
+    :param db_dict: Debug dictionary created during simulation run
+    :param bins: The bin-edges for dividing the bout delta temperature space
+    :return: A dictionary with behaviors as keys and probability in each bin as values
+    """
+    selector = np.logical_and(db_dict["sel_behav"] != '', db_dict["sel_behav"] != 'N')
+    behavior_types = np.unique(db_dict["sel_behav"][selector])
+    all_behavs = db_dict["sel_behav"][selector]
+    all_btemps = db_dict["curr_temp"][selector]
+    all_deltas = np.zeros(all_btemps.size)
+    for i in range(1, all_btemps.size):
+        all_deltas[i] = all_btemps[i] - all_btemps[i-1]
+    ad_counts = np.histogram(all_deltas, bins)[0].astype(np.float)
+    result = {k: np.zeros(bins.size - 1) for k in behavior_types}
+    for behav in behavior_types:
+        b_dtemps = all_deltas[all_behavs == behav]
+        result[behav] = np.histogram(b_dtemps, bins)[0].astype(np.float) / ad_counts
+    return result
