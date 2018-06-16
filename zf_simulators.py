@@ -654,7 +654,8 @@ class WhiteNoiseSimulation(TemperatureArena):
     """
     Class to perform white noise analysis of network models
     """
-    def __init__(self, stds: GradientStandards, model: ZfGpNetworkModel, base_freq=1.0, stim_mean=0.0, stim_std=1.0):
+    def __init__(self, stds: GradientStandards, model: ZfGpNetworkModel, base_freq=1.0, stim_mean=0.0, stim_std=1.0,
+                 t_preferred=None):
         """
         Creates a new WhiteNoiseSimulation object
         :param stds: Standardization for displacement used in model training
@@ -662,6 +663,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         :param base_freq: The baseline movement frequency in Hz
         :param stim_mean: The white noise stimulus average
         :param stim_std: The white noise stimulus standard deviation
+        :param t_preferred: Optionally the preferred temperature in C
         """
         super().__init__()
         self.p_move = base_freq / GlobalDefs.frame_rate
@@ -669,6 +671,10 @@ class WhiteNoiseSimulation(TemperatureArena):
         # for stimulus we do not generate real temperatures anyway so user selects parameters
         self.stim_mean = stim_mean
         self.stim_std = stim_std
+        # but we actually want to transform t_preferred into the same space if it exists
+        self.t_preferred = t_preferred
+        if self.t_preferred is not None:
+            self.t_preferred = (self.t_preferred - stds.temp_mean) / stds.temp_std
         # for behaviors they need to be standardized according to training data
         self.disp_mean = stds.disp_mean
         self.disp_std = stds.disp_std
@@ -760,7 +766,11 @@ class WhiteNoiseSimulation(TemperatureArena):
             model_in[0, 1, :, 0] = (speed_trace[step - history:step] - self.disp_mean) / self.disp_std
             model_in[0, 2, :, 0] = (angle_trace[step - history:step] - self.ang_mean) / self.ang_std
             model_out = self.model.predict(model_in, 1.0, self.remove).ravel()
-            behav_ranks = np.argsort(model_out)
+            if self.t_preferred is None:
+                behav_ranks = np.argsort(model_out)
+            else:
+                diffs = np.abs(model_out - self.t_preferred)  # Note that t_preferred is already normalized
+                behav_ranks = np.argsort(diffs)
             bt = self._select_behavior(behav_ranks)
             if bt == "N":
                 behav_types[step] = 0
