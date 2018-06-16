@@ -39,7 +39,7 @@ else:
 
 def train_one(batch, net_model: ZfGpNetworkModel):
     # save variables every 10000 steps but don't re-save model-meta
-    if global_count != 0 and global_count % 50000 == 0:
+    if global_count != 0 and global_count % 100000 == 0:
         path = net_model.save_state(chk_file, global_count, False)
         print("Model saved in file: %s" % path)
     xbatch = batch[0]
@@ -76,7 +76,7 @@ def train_one(batch, net_model: ZfGpNetworkModel):
         print("TEST")
         test_losses.append(cur_l)
         test_rank_errors.append(sum_rank_diffs / TESTSIZE)
-    net_model.train(xbatch, ybatch)
+    net_model.train(xbatch, ybatch, keep=0.5)
 
 
 if __name__ == "__main__":
