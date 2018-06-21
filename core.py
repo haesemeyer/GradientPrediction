@@ -203,7 +203,7 @@ class NetworkModel:
             warn("Current implementation of dale constraint hinders network training")
         self.use_dale_constraint = use_dale_constraint
         self.use_tanh = use_tanh
-        self.bias_init = 0 if use_tanh else 0.1
+        self.bias_init = 0.0 if use_tanh else 0.1
         # set training defaults
         self.w_decay = 1e-6 if self.use_tanh else 1e-4  # weight decay needs to be reduced for tanh activation
         self.keep_train = 0.5
