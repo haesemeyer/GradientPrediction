@@ -71,14 +71,15 @@ def create_weight_var(name, shape, w_decay=None, loss_collection="losses", dale=
     return var
 
 
-def create_bias_var(name, shape):
+def create_bias_var(name, shape, init):
     """
-    Creates a bias variable initialized to 1.0 to avoid dead on init units when using ReLU
+    Creates a bias variable
     :param name: The name of the variable
     :param shape: The desired shape
+    :param init: Initial value
     :return: The bias variable
     """
-    initial = tf.constant(0.1, shape=shape)
+    initial = tf.constant(init, shape=shape)
     return tf.Variable(initial, name=name)
 
 
@@ -191,17 +192,20 @@ class NetworkModel:
     """
     Base class for neuronal network models. Offers very basic shared functionality
     """
-    def __init__(self, use_dale_constraint):
+    def __init__(self, use_dale_constraint, use_tanh):
         """
         Creates a new NetworkModel
         :param use_dale_constraint: If set to true, 1/2 of network units can only provide inhibition 1/2 only excitation
+        :param use_tanh: If set to true we use tanh instead of ReLu as the activation function
         """
         self.initialized = False
         if use_dale_constraint:
             warn("Current implementation of dale constraint hinders network training")
         self.use_dale_constraint = use_dale_constraint
+        self.use_tanh = use_tanh
+        self.bias_init = 0 if use_tanh else 0.1
         # set training defaults
-        self.w_decay = 1e-4
+        self.w_decay = 1e-6 if self.use_tanh else 1e-4  # weight decay needs to be reduced for tanh activation
         self.keep_train = 0.5
         assert GlobalDefs.frame_rate % GlobalDefs.model_rate == 0
         self.t_bin = GlobalDefs.frame_rate // GlobalDefs.model_rate  # bin input down to 5Hz
@@ -247,10 +251,13 @@ class NetworkModel:
         else:
             len_0 = 3  # fully mixed network, all three inputs are convolved together
         w_conv1 = create_weight_var(self.cvn("WEIGHT", branch, -1), [len_0, self.binned_size, 1, self.n_conv_layers])
-        b_conv1 = create_bias_var(self.cvn("BIAS", branch, -1), [self.n_conv_layers])
+        b_conv1 = create_bias_var(self.cvn("BIAS", branch, -1), [self.n_conv_layers], self.bias_init)
         conv1 = create_conv2d(self.cvn("CONV", branch, -1), prev_out, w_conv1)
         cname = self.cvn("HIDDEN", branch, -1)
-        h_conv1 = tf.nn.relu(conv1 + b_conv1, cname)
+        if self.use_tanh:
+            h_conv1 = tf.nn.tanh(conv1 + b_conv1, cname)
+        else:
+            h_conv1 = tf.nn.relu(conv1 + b_conv1, cname)
         h_conv1_flat = tf.reshape(h_conv1, [-1, self.n_conv_layers], cname+"_flat")
         return h_conv1_flat
 
@@ -267,10 +274,13 @@ class NetworkModel:
             raise ValueError("branch {0} is not valid. Has to be one of {1}".format(branch, self._branches))
         w = create_weight_var(self.cvn("WEIGHT", branch, index), [prev_out.shape[1].value, n_units], self.w_decay,
                               dale=self.use_dale_constraint)
-        b = create_bias_var(self.cvn("BIAS", branch, index), [n_units])
+        b = create_bias_var(self.cvn("BIAS", branch, index), [n_units], self.bias_init)
         dr = self._det_remove[branch][index]
         scale = n_units / tf.reduce_sum(dr)
-        h = tf.nn.relu((tf.matmul(prev_out, w) + b) * dr * scale, self.cvn("HIDDEN", branch, index))
+        if self.use_tanh:
+            h = tf.nn.tanh((tf.matmul(prev_out, w) + b) * dr * scale, self.cvn("HIDDEN", branch, index))
+        else:
+            h = tf.nn.relu((tf.matmul(prev_out, w) + b) * dr * scale, self.cvn("HIDDEN", branch, index))
         return h
 
     # Public API
@@ -349,11 +359,11 @@ class GpNetworkModel(NetworkModel):
     """
     Base class of branched gradient prediction network models
     """
-    def __init__(self, use_dale_constraint):
+    def __init__(self, use_dale_constraint, use_tanh):
         """
         Creates a new GpNetworkModel
         """
-        super().__init__(use_dale_constraint)
+        super().__init__(use_dale_constraint, use_tanh)
         # initialize fields that will be populated later
         self.n_units = None
         self.n_layers_branch = None
@@ -817,11 +827,11 @@ class ZfGpNetworkModel(GpNetworkModel):
     """
     Class representing zebrafish gradient prediction network model
     """
-    def __init__(self, use_dale_constraint=False):
+    def __init__(self, use_dale_constraint=False, use_tanh=False):
         """
         Creates a new ZfGpNetworkModel
         """
-        super().__init__(use_dale_constraint)
+        super().__init__(use_dale_constraint, use_tanh)
 
     # Private API
     def _create_output(self, prev_out: tf.Tensor) -> tf.Tensor:
@@ -832,7 +842,7 @@ class ZfGpNetworkModel(GpNetworkModel):
         """
         w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 4], self.w_decay,
                               dale=self.use_dale_constraint)
-        b = create_bias_var(self.cvn("BIAS", 'o', 0), [4])
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [4], self.bias_init)
         out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
         return out
 
@@ -986,11 +996,11 @@ class CeGpNetworkModel(GpNetworkModel):
     """
     Class representing C elegans gradient prediction network model
     """
-    def __init__(self, use_dale_constraint=False):
+    def __init__(self, use_dale_constraint=False, use_tanh=False):
         """
         Creates a new CeGpNetworkModel
         """
-        super().__init__(use_dale_constraint)
+        super().__init__(use_dale_constraint, use_tanh)
 
     # Private API
     def _create_real_out_placeholder(self):
@@ -1008,7 +1018,7 @@ class CeGpNetworkModel(GpNetworkModel):
         """
         w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 5], self.w_decay,
                               dale=self.use_dale_constraint)
-        b = create_bias_var(self.cvn("BIAS", 'o', 0), [5])
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [5], self.bias_init)
         out = tf.add(tf.matmul(prev_out, w), b, name=self.cvn("OUTPUT", 'o', 0))
         return out
 
@@ -1017,11 +1027,11 @@ class SimpleRLNetwork(NetworkModel):
     """
     Simple reinforcement learning network with only temperature input
     """
-    def __init__(self, use_dale_constraint=False):
+    def __init__(self, use_dale_constraint=False, use_tanh=False):
         """
         Create a new simple reinforcment learning network model
         """
-        super().__init__(use_dale_constraint)
+        super().__init__(use_dale_constraint, use_tanh)
         # initialize fields that will be populated later
         self.n_units = None
         self.n_layers = None
@@ -1074,7 +1084,7 @@ class SimpleRLNetwork(NetworkModel):
         :return: output, log_output
         """
         w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 2], self.w_decay)
-        b = create_bias_var(self.cvn("BIAS", 'o', 0), [2])
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [2], self.bias_init)
         out = tf.nn.softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', 0))
         log_out = tf.nn.log_softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', -1))
         return out, log_out

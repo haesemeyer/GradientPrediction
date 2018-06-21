@@ -22,6 +22,7 @@ EVAL_TRAIN_EVERY = 5  # every this many trials training set performance is evalu
 EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluated
 
 SEPARATE = True
+TANH = True
 
 if SEPARATE:
     N_UNITS = [512, 512]
@@ -96,7 +97,7 @@ if __name__ == "__main__":
     test_rank_errors = []
     global_count = 0
     total_steps = N_EPOCHS * (epoch_1_size + epoch_2_size)
-    with ZfGpNetworkModel() as Model:
+    with ZfGpNetworkModel(use_tanh=TANH) as Model:
         Model.setup(N_CONV, N_UNITS, N_BRANCH, N_MIXED)
         # save naive model including full graph
         save_path = Model.save_state(chk_file, 0)
