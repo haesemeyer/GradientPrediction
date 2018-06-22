@@ -26,6 +26,7 @@ class TemperatureArena:
         self.p_move = 1.0 / GlobalDefs.frame_rate  # Bout frequency of 1Hz on average
         self.blen = int(GlobalDefs.frame_rate * 0.2)  # Bouts happen over 200 ms length
         self.bfrac = np.linspace(0, 1, self.blen)
+        self.bf_mult = 1  # optional multiplier to adjust movement probability in evolved models
         # Displacement is drawn from gamma distribution
         self.disp_k = 2.63
         self.disp_theta = 1 / 0.138
@@ -244,7 +245,7 @@ class ModelSimulation(TemperatureArena):
         activation = np.sum(temp_out * self.bf_weights)
         # apply nonlinearity
         bfreq = 1 / (1 + np.exp(-activation))  # [0, 1]
-        bfreq = (2 - 0.5) * bfreq + 0.5  # [0.5, 2]
+        bfreq = ((2 - 0.5) * bfreq + 0.5) * self.bf_mult  # [0.5, 2]
         # return corresponding probability
         return bfreq / GlobalDefs.frame_rate
 
@@ -698,7 +699,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         activation = np.sum(temp_out * self.bf_weights)
         # apply nonlinearity
         bfreq = 1 / (1 + np.exp(-activation))  # [0, 1]
-        bfreq = (2 - 0.5) * bfreq + 0.5  # [0.5, 2]
+        bfreq = ((2 - 0.5) * bfreq + 0.5) * self.bf_mult  # [0.5, 2]
         # return corresponding probability
         return bfreq / GlobalDefs.frame_rate
 
@@ -886,7 +887,7 @@ class BoutFrequencyEvolver(CircleGradSimulation):
                 bfreqs = np.sum(branch_out * self.weight_mat, 1)
                 # apply non-linearity
                 bfreqs = 1 / (1 + np.exp(-bfreqs))  # [0, 1]
-                bfreqs = (2 - 0.5) * bfreqs + 0.5  # [0.5, 2]
+                bfreqs = ((2 - 0.5) * bfreqs + 0.5) * self.bf_mult  # [0.5, 2]
                 bfreqs /= GlobalDefs.frame_rate  # turn into probability
                 last_bf_eval = steps.copy()  # update indicator
             # determine which networks should move in this step - one decider draw for all
