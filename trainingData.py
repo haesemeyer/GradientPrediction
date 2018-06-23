@@ -96,6 +96,9 @@ class LinGradientTrainer(TrainingSimulation):
         return self.sim_forward(nsteps, spos, "N").copy()
 
 
+# The bout frequency to use during the virtual navigation for training data generation
+TRAIN_BOUT_FREQ = 1
+
 if __name__ == '__main__':
     import matplotlib.pyplot as pl
     import seaborn as sns
@@ -105,6 +108,7 @@ if __name__ == '__main__':
     if response == "y":
         n_steps = int(input("Number of steps to perform?"))
         gradsim = CircGradientTrainer(100, 22, 37)
+        gradsim.p_move *= TRAIN_BOUT_FREQ  # Adjust bout frequency during training data navigation
         print("Running radial simulation, inside-out")
         pos = gradsim.run_simulation(n_steps)
         pl.figure()
@@ -118,18 +122,7 @@ if __name__ == '__main__':
         all_out = grad_data.model_out_raw
         print("Running radial simulation, outside-in")
         gradsim = CircGradientTrainer(100, 37, 22)
-        pos = gradsim.run_simulation(n_steps)
-        pl.figure()
-        pl.plot(pos[:, 0], pos[:, 1])
-        pl.xlabel("X position [mm]")
-        pl.ylabel("Y position [mm]")
-        sns.despine()
-        print("Generating gradient data")
-        grad_data = gradsim.create_dataset(pos)
-        all_in = np.r_[all_in, grad_data.model_in_raw]
-        all_out = np.r_[all_out, grad_data.model_out_raw]
-        print("Running linear simulation")
-        gradsim = LinGradientTrainer(200, 50, 22, 37)
+        gradsim.p_move *= TRAIN_BOUT_FREQ
         pos = gradsim.run_simulation(n_steps)
         pl.figure()
         pl.plot(pos[:, 0], pos[:, 1])

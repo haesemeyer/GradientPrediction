@@ -24,6 +24,9 @@ EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluat
 SEPARATE = True
 TANH = True
 
+# Indicates the bout frequency to be used in the training data (currently either 0.5, 1 or 2 have been generated)
+TRAIN_BOUT_FREQ = 1
+
 if SEPARATE:
     N_UNITS = [512, 512]
     N_BRANCH = 2
@@ -81,11 +84,22 @@ def train_one(batch, net_model: ZfGpNetworkModel):
 
 
 if __name__ == "__main__":
-    trainingData_1 = GradientData.load("gd_training_data.hdf5")
-    trainingData_2 = GradientData.load("gd_training_data_rev.hdf5")
-    trainingData_2.copy_normalization(trainingData_1)
-    testData = GradientData.load("gd_test_data_radial.hdf5")
+    if TRAIN_BOUT_FREQ == 1:
+        trainingData_1 = GradientData.load("gd_training_data.hdf5")
+        trainingData_2 = GradientData.load("gd_training_data_rev.hdf5")
+        testData = GradientData.load("gd_test_data_radial.hdf5")
+    elif TRAIN_BOUT_FREQ == 0.5:
+        trainingData_1 = GradientData.load("gd_05Hz_training_data.hdf5")
+        trainingData_2 = GradientData.load("gd_05Hz_training_data_rev.hdf5")
+        testData = GradientData.load("gd_05Hz_test_data_radial.hdf5")
+    elif TRAIN_BOUT_FREQ == 2:
+        trainingData_1 = GradientData.load("gd_2Hz_training_data.hdf5")
+        trainingData_2 = GradientData.load("gd_2Hz_training_data_rev.hdf5")
+        testData = GradientData.load("gd_2Hz_test_data_radial.hdf5")
+    else:
+        raise Exception("No training data has been generated for the requested bout frequency")
     # enforce same scaling on testData as on trainingData
+    trainingData_2.copy_normalization(trainingData_1)
     testData.copy_normalization(trainingData_1)
     epoch_1_size = trainingData_1.data_size // BATCHSIZE
     epoch_2_size = trainingData_2.data_size // BATCHSIZE
