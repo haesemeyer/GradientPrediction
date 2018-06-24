@@ -22,18 +22,24 @@ n_iter = 500000
 n_gen = 50
 TPREFERRED = 26
 
+# Indicates the baseline bout frequency
+TRAIN_BOUT_FREQ = 1
+
 
 def mpath(path):
     return base_path + path[:-1]  # need to remove trailing slash
 
 
 if __name__ == "__main__":
-    # load training data for scaling
-    try:
+    # load training data for scaling - dependent on bout frequency
+    if TRAIN_BOUT_FREQ == 1:
         std = GradientData.load_standards("gd_training_data.hdf5")
-    except IOError:
-        print("No standards found attempting to load full training data")
-        std = GradientData.load("gd_training_data.hdf5").standards
+    elif TRAIN_BOUT_FREQ == 0.5:
+        std = GradientData.load_standards("gd_05Hz_training_data.hdf5")
+    elif TRAIN_BOUT_FREQ == 2:
+        std = GradientData.load_standards("gd_2Hz_training_data.hdf5")
+    else:
+        raise Exception("No training data has been generated for the requested bout frequency")
 
     # evolve each 512 network unless it has been done before
     for p in paths_512:
@@ -48,6 +54,9 @@ if __name__ == "__main__":
         gpn = ZfGpNetworkModel()
         gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
         bfe = BoutFrequencyEvolver(std, gpn)
+        # set baseline bout frequency according to constant above
+        bfe.p_move *= TRAIN_BOUT_FREQ
+        bfe.bf_mult = TRAIN_BOUT_FREQ
         weights = np.full((n_gen, bfe.n_networks, bfe.n_weights), np.nan)
         errors = np.full((n_gen, bfe.n_networks), np.nan)
         t_start = perf_counter()
