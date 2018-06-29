@@ -22,7 +22,7 @@ EVAL_TRAIN_EVERY = 5  # every this many trials training set performance is evalu
 EVAL_TEST_EVERY = 1000  # every this many trials test set performance is evaluated
 
 SEPARATE = True
-TANH = True
+TANH = False
 
 # Indicates the bout frequency to be used in the training data (currently either 0.5, 1 or 2 have been generated)
 TRAIN_BOUT_FREQ = 1
