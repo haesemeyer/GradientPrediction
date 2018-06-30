@@ -18,8 +18,6 @@ import analysis as a
 import h5py
 from global_defs import GlobalDefs
 from pandas import DataFrame
-import pickle
-from data_stores import SimulationStore, ActivityStore
 from Figure4 import mpath
 from scipy.signal import convolve
 
@@ -27,6 +25,59 @@ from scipy.signal import convolve
 # file definitions
 base_path_zf = "./model_data/Adam_1e-4/sepInput_mixTrain/"
 paths_512_zf = [f + '/' for f in os.listdir(base_path_zf) if "_3m512_" in f]
+
+base_path_05Hz = "./model_data/Adam_1e-4/halfHz/"
+paths_05Hz = [f+'/' for f in os.listdir(base_path_05Hz) if "_3m512_" in f]
+
+base_path_2Hz = "./model_data/Adam_1e-4/doubleHz/"
+paths_2Hz = [f+'/' for f in os.listdir(base_path_2Hz) if "_3m512_" in f]
+
+
+def compute_white_noise(base_freq):
+    if base_freq == 0.5:
+        paths = paths_05Hz
+        base = base_path_05Hz
+        std = std_05Hz
+        n_steps = 100000000
+    elif base_freq == 1.0:
+        paths = paths_512_zf
+        base = base_path_zf
+        std = std_zf
+        n_steps = 10000000  # there are 10 times as many models
+    elif base_freq == 2.0:
+        paths = paths_2Hz
+        base = base_path_2Hz
+        std = std_2Hz
+        n_steps = 50000000
+    else:
+        raise ValueError("Indicated base frequency has not been trained")
+    behav_kernels = {}
+    k_names = ["stay", "straight", "left", "right"]
+    for p in paths:
+        m_path = mpath(base, p)
+        mdata_wn = c.ModelData(m_path)
+        gpn_wn = mo.network_model()
+        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
+        wna = mo.wn_sim(std, gpn_wn, stim_std=2)
+        wna.p_move *= base_freq
+        wna.bf_mult = base_freq
+        wna.switch_mean = 5
+        wna.switch_std = 1
+        ev_path = m_path + '/evolve/generation_weights.npy'
+        weights = np.load(ev_path)
+        w = np.mean(weights[-1, :, :], 0)
+        wna.bf_weights = w
+        kernels = wna.compute_behavior_kernels(n_steps)
+        for i, n in enumerate(k_names):
+            if n in behav_kernels:
+                behav_kernels[n].append(kernels[i])
+            else:
+                behav_kernels[n] = [kernels[i]]
+    time = np.linspace(-4, 1, behav_kernels['straight'][0].size)
+    for n in k_names:
+        behav_kernels[n] = np.vstack(behav_kernels[n])
+    plot_kernel = (behav_kernels["straight"] + behav_kernels["left"] + behav_kernels["right"]) / 3
+    return time, plot_kernel
 
 
 if __name__ == "__main__":
@@ -36,6 +87,8 @@ if __name__ == "__main__":
     sns.reset_orig()
     mpl.rcParams['pdf.fonttype'] = 42
 
+    std_05Hz = c.GradientData.load_standards("gd_05Hz_training_data.hdf5")
+    std_2Hz = c.GradientData.load_standards("gd_2Hz_training_Data.hdf5")
     std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
     ana_zf = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", "activity_store.hdf5")
 
@@ -124,6 +177,40 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "zf_all_cluster_counts.pdf", type="pdf")
 
+    # panel for ON-OFF type search in zebrafish
+    on_off = 7
+    # load fish activity data
+    dfile = h5py.File('H:/ClusterLocations_170327_clustByMaxCorr/datafile_170327.hdf5', 'r')
+    all_activity = np.array(dfile['all_activity'])
+    no_nan_aa = np.array(dfile['no_nan_aa'])
+    tf_centroids = np.array(dfile['tf_centroids'])[no_nan_aa, :]
+    frame_times = np.arange(all_activity.shape[1]) / 5
+    dfile.close()
+    dfile = h5py.File("stack_types.hdf5", 'r')
+    stack_types = np.array(dfile["stack_types"])[no_nan_aa]
+    dfile.close()
+    network_times = np.arange(all_cells_zf.shape[0]) / GlobalDefs.frame_rate
+    on_off_regressor = np.mean(all_cells_zf[:, clust_ids_zf == on_off], 1)
+    on_off_regressor = np.interp(frame_times, network_times, on_off_regressor)
+    on_off_corrs = np.zeros(all_activity.shape[0])
+    for i, act in enumerate(all_activity):
+        on_off_corrs[i] = np.corrcoef(act, on_off_regressor)[0, 1]
+    on_off_fish = a.trial_average(all_activity[on_off_corrs > 0.6, :].T, 3).T
+    F0 = np.mean(on_off_fish[:, :30 * 5], 1, keepdims=True)
+    on_off_fish = (on_off_fish - F0) / F0
+    on_off_netw = a.trial_average(on_off_regressor[:, None], 3).ravel()
+    fish_trial_time = np.arange(on_off_fish.shape[1]) / 5
+    fig, (ax_net, ax_fish) = pl.subplots(nrows=2, sharex=True)
+    ax_net.plot(fish_trial_time, on_off_netw, color=(76 / 255, 153 / 255, 153 / 255))
+    sns.tsplot(on_off_fish, fish_trial_time, color=(76 / 255, 153 / 255, 153 / 255), ax=ax_fish)
+    ax_fish.set_xlabel("Time [s]")
+    ax_fish.set_ylabel("Activity [dF/F]")
+    ax_net.set_ylabel("Activation")
+    ax_fish.set_xticks([0, 30, 60, 90, 120, 150])
+    ax_net.set_xticks([0, 30, 60, 90, 120, 150])
+    sns.despine(fig)
+    fig.savefig(save_folder + "on_off_type_activity.pdf", type="pdf")
+
     raise Exception("Skipping white noise analysis to save time")
     # panel 1 - white noise analysis on naive networks
     mo = MoTypes(False)
@@ -157,3 +244,24 @@ if __name__ == "__main__":
     ax.legend()
     sns.despine(fig, ax)
     fig.savefig(save_folder+"zf_naive_white_noise_kernels.pdf", type="pdf")
+
+    plot_kernel_05Hz = compute_white_noise(0.5)[1]
+    plot_kernel_1Hz = compute_white_noise(1.0)[1]
+    kernel_time, plot_kernel_2Hz = compute_white_noise(2.0)
+
+    m_05Hz = np.mean(plot_kernel_05Hz, 0)
+    m_1Hz = np.mean(plot_kernel_1Hz, 0)
+    m_2Hz = np.mean(plot_kernel_2Hz, 0)
+
+    #  panel - white noise analysis comparison
+    fig, ax = pl.subplots()
+    ax.plot(kernel_time, m_05Hz, label="0.5 Hz")
+    ax.plot(kernel_time, m_1Hz, label="1.0 Hz")
+    ax.plot(kernel_time, m_2Hz, label="2.0 Hz")
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.1, 0.3], 'k--', lw=0.25)
+    ax.set_ylabel("Normalized filter")
+    ax.set_xlabel("Time around bout [s]")
+    ax.legend()
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "wn_kernels_moveFreq_compare.pdf", type="pdf")

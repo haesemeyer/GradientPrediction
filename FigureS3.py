@@ -3,8 +3,9 @@
 # Licensed under the MIT license
 
 """
-Script for panels of Figure S3 (Zebrafish network ablations)
+Script for panels of Figure S3 (Zebrafish tanh network characterization)
 """
+
 
 import os
 import numpy as np
@@ -16,11 +17,28 @@ import core as c
 import analysis as a
 import h5py
 from global_defs import GlobalDefs
-from Figure3 import mpath
+from pandas import DataFrame
+from Figure4 import mpath
+from scipy.signal import convolve
+from sklearn.decomposition import PCA
+
 
 # file definitions
+base_path_th = "./model_data/Adam_1e-4/tanh/"
+paths_512_th = [f + '/' for f in os.listdir(base_path_th) if "_3m512_" in f]
+
 base_path_zf = "./model_data/Adam_1e-4/sepInput_mixTrain/"
 paths_512_zf = [f + '/' for f in os.listdir(base_path_zf) if "_3m512_" in f]
+
+
+def test_loss(base_path, path):
+    fname = base_path + path + "losses.hdf5"
+    lossfile = h5py.File(fname, "r")
+    test_losses = np.array(lossfile["test_losses"])
+    rank_errors = np.array(lossfile["test_rank_errors"])
+    timepoints = np.array(lossfile["test_eval"])
+    return timepoints, test_losses, rank_errors
+
 
 if __name__ == "__main__":
     save_folder = "./DataFigures/FigureS3/"
@@ -29,14 +47,52 @@ if __name__ == "__main__":
     sns.reset_orig()
     mpl.rcParams['pdf.fonttype'] = 42
 
-    std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
+    # first panel - log squared error progression over training
+    test_time = test_loss(base_path_th, paths_512_th[0])[0]
+    test_512 = np.vstack([test_loss(base_path_th, lp)[1] for lp in paths_512_th])
+    test_relu = np.vstack([test_loss(base_path_zf, lp)[1] for lp in paths_512_zf])
+    fig, ax = pl.subplots()
+    sns.tsplot(np.log10(test_512), test_time, ax=ax, color="C1", n_boot=1000, condition="Tanh")
+    ax.plot(test_time, np.mean(np.log10(test_relu), 0), 'k', lw=0.25, label="Relu")
+    epoch_times = np.linspace(0, test_time.max(), 10, endpoint=False)
+    for e in epoch_times:
+        ax.plot([e, e], [-1.2, .4], 'k--', lw=0.25)
+    ax.set_ylabel("log(Squared test error)")
+    ax.set_xlabel("Training step")
+    ax.set_xlim(-10000)
+    ax.set_xticks([0, 250000, 500000, 750000])
+    ax.legend()
+    sns.despine(fig, ax)
+    fig.savefig(save_folder+"test_errors_th.pdf", type="pdf")
 
+    std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
+    ana_th = a.Analyzer(MoTypes(False), std_zf, "sim_store_tanh.hdf5", "activity_store_tanh.hdf5")
     ana_zf = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", "activity_store.hdf5")
 
-    # load cluster data from file
-    clfile = h5py.File("cluster_info.hdf5", "r")
-    clust_ids_zf = np.array(clfile["clust_ids"])
-    clfile.close()
+    # second panel: Gradient distribution
+    bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
+    centers = a.temp_convert(bns[:-1]+np.diff(bns), "r")
+    naive = np.empty((len(paths_512_th), centers.size))
+    trained_th = np.empty_like(naive)
+    trained_zf = np.empty((len(paths_512_zf), centers.size))
+    for i, p in enumerate(paths_512_th):
+        pos_n = ana_th.run_simulation(mpath(base_path_th, p), "r", "naive")
+        naive[i, :] = a.bin_simulation(pos_n, bns, "r")
+        pos_t = ana_th.run_simulation(mpath(base_path_th, p), "r", "trained")
+        trained_th[i, :] = a.bin_simulation(pos_t, bns, "r")
+    for i, p in enumerate(paths_512_zf):
+        pos_t = ana_zf.run_simulation(mpath(base_path_zf, p), "r", "trained")
+        trained_zf[i, :] = a.bin_simulation(pos_t, bns, "r")
+    fig, ax = pl.subplots()
+    sns.tsplot(naive, centers, n_boot=1000, condition="Naive", color='k')
+    sns.tsplot(trained_th, centers, n_boot=1000, condition="Trained", color="C1")
+    ax.plot(centers, np.mean(trained_zf, 0), 'k', lw=0.25)
+    ax.plot([GlobalDefs.tPreferred, GlobalDefs.tPreferred], [0, 0.03], 'k--', lw=0.25)
+    ax.legend()
+    ax.set_xlabel("Temperature [C]")
+    ax.set_ylabel("Proportion")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder+"gradient_distribution_th.pdf", type="pdf")
 
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
@@ -47,42 +103,124 @@ if __name__ == "__main__":
     dfile.close()
 
     # get activity data
+    all_ids_th = []
+    all_cells_th = []
+    for i, p in enumerate(paths_512_th):
+        cell_res, ids = ana_th.temperature_activity(mpath(base_path_th, p), temperature, i)
+        all_ids_th.append(ids)
+        all_cells_th.append(cell_res)
+    all_ids_th = np.hstack(all_ids_th)
+    all_cells_th = np.hstack(all_cells_th)
     all_ids_zf = []
+    all_cells_zf = []
     for i, p in enumerate(paths_512_zf):
         cell_res, ids = ana_zf.temperature_activity(mpath(base_path_zf, p), temperature, i)
         all_ids_zf.append(ids)
+        all_cells_zf.append(cell_res)
     all_ids_zf = np.hstack(all_ids_zf)
+    all_cells_zf = np.hstack(all_cells_zf)
 
-    # panel X - white noise analysis after fish-like ablations to show that non-fish types modulate behavior
-    mo = MoTypes(False)
-    behav_kernels = {}
-    k_names = ["stay", "straight", "left", "right"]
-    for i, p in enumerate(paths_512_zf):
-        m_path = mpath(base_path_zf, p)
-        mdata_wn = c.ModelData(m_path)
-        gpn_wn = mo.network_model()
-        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
-        wna = mo.wn_sim(std_zf, gpn_wn, stim_std=2)
-        wna.switch_mean = 5
-        wna.switch_std = 1
-        wna.remove = a.create_det_drop_list(i, clust_ids_zf, all_ids_zf, [1, 2, 3, 4, 5])
-        kernels = wna.compute_behavior_kernels(10000000)
-        for j, n in enumerate(k_names):
-            if n in behav_kernels:
-                behav_kernels[n].append(kernels[j])
-            else:
-                behav_kernels[n] = [kernels[j]]
-    kernel_time = np.linspace(-4, 1, behav_kernels['straight'][0].size)
-    for n in k_names:
-        behav_kernels[n] = np.vstack(behav_kernels[n])
-    plot_kernels = {"straight": behav_kernels["straight"], "turn": (behav_kernels["left"] + behav_kernels["right"])/2}
+    # convolve activity with nuclear gcamp calcium kernel
+    tau_on = 1.4  # seconds
+    tau_on *= GlobalDefs.frame_rate  # in frames
+    tau_off = 2  # seconds
+    tau_off *= GlobalDefs.frame_rate  # in frames
+    kframes = np.arange(10 * GlobalDefs.frame_rate)  # 10 s long kernel
+    kernel = 2 ** (-kframes / tau_off) * (1 - 2 ** (-kframes / tau_on))
+    kernel = kernel / kernel.sum()
+    # convolve with our kernel
+    for i in range(all_cells_th.shape[1]):
+        all_cells_th[:, i] = convolve(all_cells_th[:, i], kernel, method='full')[:all_cells_th.shape[0]]
+    for i in range(all_cells_zf.shape[1]):
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+
+    # load cluster data from file
+    clust_ids_th = a.cluster_activity(8, all_cells_th, "cluster_info_tanh.hdf5")[0]
+    clust_ids_zf = a.cluster_activity(8, all_cells_zf, "cluster_info.hdf5")[0]
+
+    # plot colors
+    pal = sns.color_palette()  # the default matplotlib color cycle
+    plot_cols_th = {0: pal[0], 1: pal[1], 2: pal[2], 3: pal[3], 4: pal[4], 5: pal[5],
+                    6: pal[6], 7: pal[7], -1: (0.6, 0.6, 0.6)}
+
+    # panel - all cluster activities, sorted into ON and anti-correlated OFF types
+    n_regs_th = np.unique(clust_ids_th).size - 1
+    n_regs_zf = np.unique(clust_ids_zf).size - 1
+    cluster_acts_th = np.zeros((all_cells_th.shape[0] // 3, n_regs_th))
+    is_on = np.zeros(n_regs_th, dtype=bool)
+    ax_ix = np.full(n_regs_th, -1, dtype=int)
+    on_count = 0
+    for i in range(n_regs_th):
+        act = np.mean(a.trial_average(all_cells_th[:, clust_ids_th == i], 3), 1)
+        cluster_acts_th[:, i] = act
+        is_on[i] = np.corrcoef(act, temperature[:act.size])[0, 1] > 0
+        # correspondin axis on ON plot is simply set by order of cluster occurence
+        if is_on[i]:
+            ax_ix[i] = 0 if on_count < 2 else 1
+            on_count += 1
+    # for off types, put them on the corresponding off axis of the most anti-correlated ON type
+    type_corrs_th = np.corrcoef(cluster_acts_th.T)
+    for i in range(n_regs_th):
+        if not is_on[i]:
+            corresponding_on = np.argmin(type_corrs_th[i, :])
+            assert is_on[corresponding_on]
+            ax_ix[i] = ax_ix[corresponding_on]
+    fig, (axes_on, axes_off) = pl.subplots(ncols=2, nrows=2, sharey=True, sharex=True)
+    time = np.arange(cluster_acts_th.shape[0]) / GlobalDefs.frame_rate
+    for i in range(n_regs_th):
+        act = cluster_acts_th[:, i]
+        if not is_on[i]:
+            ax_off = axes_off[ax_ix[i]]
+            ax_off.plot(time, cluster_acts_th[:, i], color=plot_cols_th[i])
+        else:
+            ax_on = axes_on[ax_ix[i]]
+            ax_on.plot(time, cluster_acts_th[:, i], color=plot_cols_th[i])
+    axes_off[0].set_xticks([0, 30, 60, 90, 120, 150])
+    axes_off[1].set_xticks([0, 30, 60, 90, 120, 150])
+    axes_off[0].set_xlabel("Time [s]")
+    axes_off[1].set_xlabel("Time [s]")
+    axes_on[0].set_ylabel("Cluster average activation")
+    axes_off[0].set_ylabel("Cluster average activation")
+    sns.despine()
+    fig.tight_layout()
+    fig.savefig(save_folder + "th_all_cluster_averages.pdf", type="pdf")
+
+    # panel - average type counts in temperature branch for each cluster
+    cl_type_d = {"Fraction": [], "net_id": [], "Cluster ID": []}
+    for i in range(len(paths_512_th)):
+        net_clust_ids = clust_ids_th[all_ids_th[0, :] == i]
+        for j in range(-1, n_regs_th):
+            cl_type_d["Fraction"].append(np.sum(net_clust_ids == j) / 1024)
+            cl_type_d["net_id"].append(i)
+            cl_type_d["Cluster ID"].append(j)
+    cl_type_df = DataFrame(cl_type_d)
     fig, ax = pl.subplots()
-    for i, n in enumerate(plot_kernels):
-        sns.tsplot(plot_kernels[n], kernel_time, n_boot=1000, color="C{0}".format(i), ax=ax, condition=n)
-    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
-    ax.plot([0, 0], [-0.1, 0.2], 'k--', lw=0.25)
-    ax.set_ylabel("Filter kernel")
-    ax.set_xlabel("Time around bout [s]")
-    ax.legend()
+    sns.barplot("Cluster ID", "Fraction", data=cl_type_df, order=list(range(n_regs_th)) + [-1], ci=68, ax=ax,
+                palette=plot_cols_th)
+    ax.set_yticks([0, 0.1, 0.2, 0.3])
     sns.despine(fig, ax)
-    fig.savefig(save_folder+"nonfish_only_white_noise_kernels.pdf", type="pdf")
+    fig.savefig(save_folder + "th_all_cluster_counts.pdf", type="pdf")
+
+    # panel - cumulative explained variance by ReLu and Tanh PCs
+    cluster_acts_zf = np.zeros((all_cells_zf.shape[0] // 3, n_regs_zf))
+    for i in range(n_regs_zf):
+        act = np.mean(a.trial_average(all_cells_zf[:, clust_ids_zf == i], 3), 1)
+        cluster_acts_zf[:, i] = act
+    type_corrs_zf = np.corrcoef(cluster_acts_zf.T)
+
+    pca_zf = PCA(n_components=20)
+    pca_zf.fit(a.trial_average(all_cells_zf, 3).T)
+    pca_th = PCA(n_components=20)
+    pca_th.fit(a.trial_average(all_cells_th, 3).T)
+
+    fig, ax = pl.subplots()
+    ax.plot(np.arange(20) + 1, np.cumsum(pca_zf.explained_variance_ratio_)*100, '.', label='ReLu')
+    ax.plot(np.arange(20) + 1, np.cumsum(pca_th.explained_variance_ratio_)*100, '.', label='tanh')
+    ax.plot([1, 20], [100, 100], 'k--', lw=0.25)
+    ax.plot([1, 20], [99, 99], 'k--', lw=0.25)
+    ax.legend()
+    ax.set_xticks([0, 5, 10, 15, 20])
+    ax.set_xlabel("Principal component")
+    ax.set_ylabel("Cumulative explained variance [%]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "th_zf_pca_cumvar_comp.pdf", type="pdf")

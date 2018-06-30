@@ -3,7 +3,7 @@
 # Licensed under the MIT license
 
 """
-Script for panels of Figure 3 (Zebrafish network ablations)
+Script for panels of Figure S1 (Zebrafish network evolution example)
 """
 
 import os
@@ -11,12 +11,6 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as pl
 import seaborn as sns
-from mo_types import MoTypes
-import core as c
-import analysis as a
-import h5py
-from global_defs import GlobalDefs
-from data_stores import SimulationStore
 from Figure3 import mpath
 
 # file definitions
