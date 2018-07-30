@@ -186,19 +186,24 @@ if __name__ == "__main__":
     fig.savefig(save_folder + "th_all_cluster_averages.pdf", type="pdf")
 
     # panel - average type counts in temperature branch for each cluster
-    cl_type_d = {"Fraction": [], "net_id": [], "Cluster ID": []}
+    cl_type_d = {"Fraction": [], "net_id": [], "Cluster ID": [], "Layer": []}
     for i in range(len(paths_512_th)):
-        net_clust_ids = clust_ids_th[all_ids_th[0, :] == i]
         for j in range(-1, n_regs_th):
-            cl_type_d["Fraction"].append(np.sum(net_clust_ids == j) / 1024)
-            cl_type_d["net_id"].append(i)
-            cl_type_d["Cluster ID"].append(j)
+            for k in range(2):
+                lay_clust_ids = clust_ids_th[np.logical_and(all_ids_th[0, :] == i, all_ids_th[1, :] == k)]
+                cl_type_d["Fraction"].append(np.sum(lay_clust_ids == j) / 512)
+                cl_type_d["net_id"].append(i)
+                cl_type_d["Cluster ID"].append(j)
+                cl_type_d["Layer"].append(k)
     cl_type_df = DataFrame(cl_type_d)
-    fig, ax = pl.subplots()
-    sns.barplot("Cluster ID", "Fraction", data=cl_type_df, order=list(range(n_regs_th)) + [-1], ci=68, ax=ax,
-                palette=plot_cols_th)
-    ax.set_yticks([0, 0.1, 0.2, 0.3])
-    sns.despine(fig, ax)
+    fig, (ax_0, ax_1) = pl.subplots(nrows=2, sharex=True)
+    sns.barplot("Cluster ID", "Fraction", data=cl_type_df[cl_type_df["Layer"] == 0],
+                order=list(range(n_regs_th)) + [-1], ci=68, ax=ax_0, palette=plot_cols_th)
+    sns.barplot("Cluster ID", "Fraction", data=cl_type_df[cl_type_df["Layer"] == 1],
+                order=list(range(n_regs_th)) + [-1], ci=68, ax=ax_1, palette=plot_cols_th)
+    ax_0.set_yticks([0, 0.1, 0.2, 0.3, 0.4])
+    ax_1.set_yticks([0, 0.1, 0.2, 0.3, 0.4])
+    sns.despine(fig)
     fig.savefig(save_folder + "th_all_cluster_counts.pdf", type="pdf")
 
     # panel - cumulative explained variance by ReLu and Tanh PCs
