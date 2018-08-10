@@ -139,13 +139,22 @@ if __name__ == "__main__":
     naive = np.empty((len(paths_512), centers.size))
     trained = np.empty_like(naive)
     evolved = np.empty_like(naive)
+    naive_errors = []
+    trained_errors = []
+    evolved_errors = []
     for i, p in enumerate(paths_512):
         pos_n = ana.run_simulation(mpath(p), "r", "naive")
+        naive_errors.append(a.temp_error(pos_n, 'r'))
         naive[i, :] = a.bin_simulation(pos_n, bns, "r")
         pos_t = ana.run_simulation(mpath(p), "r", "trained")
+        trained_errors.append(a.temp_error(pos_t, 'r'))
         trained[i, :] = a.bin_simulation(pos_t, bns, "r")
         pos_e = ana.run_simulation(mpath(p), "r", "bfevolve")
+        evolved_errors.append(a.temp_error(pos_e, 'r'))
         evolved[i, :] = a.bin_simulation(pos_e, bns, "r")
+    print("Naive erorr = {0} C".format(np.mean(naive_errors)))
+    print("Trained erorr = {0} C".format(np.mean(trained_errors)))
+    print("Evolved erorr = {0} C".format(np.mean(evolved_errors)))
     fig, ax = pl.subplots()
     sns.tsplot(naive, centers, n_boot=1000, condition="Naive", color='k')
     sns.tsplot(trained, centers, n_boot=1000, condition="Trained", color="C1")
