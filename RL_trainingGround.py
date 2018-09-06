@@ -14,6 +14,7 @@ import seaborn as sns
 from scipy.ndimage import gaussian_filter1d
 import h5py
 from global_defs import GlobalDefs
+import os
 
 
 class RLTrainer(TemperatureArena):
@@ -192,70 +193,109 @@ class CircleRLTrainer(RLTrainer):
         return self.radius
 
 
-N_STEPS = 500000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
-N_EPOCHS = 4000  # the number of total training epochs to run
+N_STEPS = 100000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
+STEP_INC = 500  # the total number of steps to run is N_STEPS + episode*STEP_INC
+N_EPOCHS = 2000  # the number of total training epochs to run
 N_CONV = 20  # the number of convolution filters in the network
 N_LAYERS = 3  # the number of hidden layers in the network
 N_UNITS = 128  # the number of units in each network hidden layer
 T_PREFERRED = 26  # the preferred temperature after training
-SAVE_EVERY = 100  # save network state every this many episodes
+SAVE_EVERY = 500  # save network state every this many episodes
+NUM_NETS = 20  # the total number of networks to train
 
 if __name__ == "__main__":
-    chk_file = "./model_data/simpleRLModel.ckpt"
-    running_rewards = []  # for each performed step the received reward
-    ep_avg_grad_error = []  # for each episode the average deviation from the preferred temperature
-    global_count = 0
-    with SimpleRLNetwork() as rl_net:
-        rl_net.setup(N_CONV, N_UNITS, N_LAYERS)
-        # save naive model including full graph
-        save_path = rl_net.save_state(chk_file, 0)
-        print("Model saved in file: %s" % save_path)
-        for ep in range(N_EPOCHS):
+    # instantiate example trainer objects to allow for a fixed temperature mean and standard across
+    # both temperature regimes
+    ex1 = CircleRLTrainer(None, 100, 22, 37, T_PREFERRED)
+    tm1 = ex1.t_mean
+    s1 = ex1.t_std
+    ex2 = CircleRLTrainer(None, 100, 14, 29, T_PREFERRED)
+    tm2 = ex2.t_mean
+    s2 = ex2.t_std
+    temp_mean = (tm1 + tm2) / 2
+    temp_std = (s1 + s2) / 2
+    for net_num in range(NUM_NETS):
+        train_folder = "./model_data/SimpleRL_Net/mx_{0}".format(net_num)
+        try:
+            os.makedirs(train_folder, exist_ok=False)
+        except OSError:
+            print("Skipping training of {0} since output path already exists.".format(net_num), flush=True)
+            continue
+        chk_file = train_folder + "/simpleRLModel.ckpt"
+        running_rewards = []  # for each performed step the received reward
+        ep_avg_grad_error = []  # for each episode the average deviation from the preferred temperature
+        rewards_given = []  # for each episode the number of rewards given in that episode
+        global_count = 0
+        with SimpleRLNetwork() as rl_net:
+            rl_net.setup(N_CONV, N_UNITS, N_LAYERS)
+            # save naive model including full graph
+            save_path = rl_net.save_state(chk_file, 0)
+            print("Model saved in file: %s" % save_path)
+            for ep in range(N_EPOCHS):
+                if ep % 2 == 0:
+                    circ_train = CircleRLTrainer(rl_net, 100, 22, 37, T_PREFERRED)
+                    circ_train.t_mean = temp_mean
+                    circ_train.t_std = temp_std
+                else:
+                    circ_train = CircleRLTrainer(rl_net, 100, 14, 29, T_PREFERRED)
+                    circ_train.t_mean = temp_mean
+                    circ_train.t_std = temp_std
+                ep_pos, ep_rewards = circ_train.run_sim(N_STEPS + ep*STEP_INC, True)
+                temps = circ_train.temperature(ep_pos[:, 0], ep_pos[:, 1])
+                weights = 1 / np.sqrt(np.sum(ep_pos[:, :2] ** 2, 1))
+                weights[np.isinf(weights)] = 0  # occurs when 0,0 was picked as starting point only
+                sum_of_weights = np.nansum(weights)
+                weighted_sum = np.nansum(np.sqrt((temps - T_PREFERRED) ** 2) * weights)
+                avg_error = weighted_sum / sum_of_weights
+                ep_avg_grad_error.append(avg_error)
+                rewards_given.append(len(ep_rewards))
+                running_rewards += ep_rewards
+                print("Epoch {0} of {1} has been completed. Average gradient error: {2}".format(ep+1,
+                                                                                                N_EPOCHS,
+                                                                                                np.round(avg_error, 1)))
+                global_count += 1
+                if global_count % SAVE_EVERY == 0:
+                    save_path = rl_net.save_state(chk_file, global_count, False)
+                    print("Model saved in file: %s" % save_path)
+            save_path = rl_net.save_state(chk_file, global_count, False)
+            print("Final model saved in file: %s" % save_path)
+            weights_conv1 = rl_net.convolution_data[0]
+            weights_conv1 = weights_conv1['t']
+            # run one final test
             circ_train = CircleRLTrainer(rl_net, 100, 22, 37, T_PREFERRED)
-            ep_pos, ep_rewards = circ_train.run_sim(N_STEPS, True)
+            circ_train.t_mean = temp_mean
+            circ_train.t_std = temp_std
+            ep_pos, ep_rewards = circ_train.run_sim(1000000, False)
             temps = circ_train.temperature(ep_pos[:, 0], ep_pos[:, 1])
             weights = 1 / np.sqrt(np.sum(ep_pos[:, :2] ** 2, 1))
             weights[np.isinf(weights)] = 0  # occurs when 0,0 was picked as starting point only
             sum_of_weights = np.nansum(weights)
             weighted_sum = np.nansum(np.sqrt((temps - T_PREFERRED) ** 2) * weights)
             avg_error = weighted_sum / sum_of_weights
-            ep_avg_grad_error.append(avg_error)
-            running_rewards += ep_rewards
-            print("Epoch {0} of {1} has been completed. Average gradient error: {2}".format(ep+1, N_EPOCHS, avg_error))
-            global_count += 1
-            if global_count % SAVE_EVERY == 0:
-                save_path = rl_net.save_state(chk_file, global_count, False)
-                print("Model saved in file: %s" % save_path)
-        save_path = rl_net.save_state(chk_file, global_count, False)
-        print("Final model saved in file: %s" % save_path)
-        weights_conv1 = rl_net.convolution_data[0]
-        weights_conv1 = weights_conv1['t']
+            print("Final test navigation error = {0} C".format(np.round(avg_error, 1)))
 
-    w_ext = np.max(np.abs(weights_conv1))
-    fig, ax = pl.subplots(ncols=int(np.sqrt(N_CONV)), nrows=int(np.sqrt(N_CONV)), frameon=False,
-                          figsize=(14, 2.8))
-    ax = ax.ravel()
-    for j, a in enumerate(ax):
-        sns.heatmap(weights_conv1[:, :, 0, j], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
-        a.axis("off")
+        w_ext = np.max(np.abs(weights_conv1))
+        fig, ax = pl.subplots(ncols=int(np.sqrt(N_CONV)), nrows=int(np.sqrt(N_CONV)), frameon=False,
+                              figsize=(14, 2.8))
+        ax = ax.ravel()
+        for j, a in enumerate(ax):
+            sns.heatmap(weights_conv1[:, :, 0, j], ax=a, vmin=-w_ext, vmax=w_ext, center=0, cbar=False)
+            a.axis("off")
 
-    ep_avg_grad_error = np.array(ep_avg_grad_error)
-    running_rewards = np.array(running_rewards)
-    fig, ax = pl.subplots()
-    ax.plot(gaussian_filter1d(running_rewards, 250))
-    ax.set_xlabel("Training step")
-    ax.set_ylabel("Received rewards")
-    sns.despine(fig, ax)
+        ep_avg_grad_error = np.array(ep_avg_grad_error)
+        running_rewards = np.array(running_rewards)
+        rewards_given = np.array(rewards_given)
 
-    fig, ax = pl.subplots()
-    ax.plot(gaussian_filter1d(ep_avg_grad_error, 3), 'o')
-    ax.set_xlabel("Training episode")
-    ax.set_ylabel("Average gradient error [C]")
-    sns.despine(fig, ax)
+        fig, ax = pl.subplots()
+        ax.plot(np.cumsum(rewards_given), gaussian_filter1d(ep_avg_grad_error, 3), '.')
+        ax.set_xlabel("# Received rewards")
+        ax.set_ylabel("Average gradient error [C]")
+        ax.set_title("Model {0}. Final gradient test error = {1} C.".format(net_num, np.round(avg_error, 1)))
+        sns.despine(fig, ax)
 
-    # save loss evaluations to file
-    with h5py.File("./model_data/losses.hdf5", "x") as dfile:
-        dfile.create_dataset("episodes", data=np.arange(N_EPOCHS))
-        dfile.create_dataset("ep_avg_grad_error", data=ep_avg_grad_error)
-        dfile.create_dataset("steps", data=np.arange(running_rewards.size))
-        dfile.create_dataset("running_rewards", data=running_rewards)
+        # save loss evaluations to file
+        with h5py.File(train_folder + "/losses.hdf5", "x") as dfile:
+            dfile.create_dataset("episodes", data=np.arange(N_EPOCHS))
+            dfile.create_dataset("ep_avg_grad_error", data=ep_avg_grad_error)
+            dfile.create_dataset("rewards_given", data=rewards_given)
+            dfile.create_dataset("running_rewards", data=running_rewards)
