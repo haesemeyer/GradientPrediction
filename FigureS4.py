@@ -134,9 +134,9 @@ if __name__ == "__main__":
     kernel = kernel / kernel.sum()
     # convolve with our kernel
     for i in range(all_cells_zf.shape[1]):
-        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, mode='full')[:all_cells_zf.shape[0]]
     for i in range(all_cells_pt.shape[1]):
-        all_cells_pt[:, i] = convolve(all_cells_pt[:, i], kernel, method='full')[:all_cells_pt.shape[0]]
+        all_cells_pt[:, i] = convolve(all_cells_pt[:, i], kernel, mode='full')[:all_cells_pt.shape[0]]
 
     # Panel 2 - naive and trained phototaxis performance
     all_n = []

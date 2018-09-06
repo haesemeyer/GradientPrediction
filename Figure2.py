@@ -79,7 +79,7 @@ if __name__ == "__main__":
     kernel = kernel / kernel.sum()
     # convolve with our kernel
     for i in range(all_cells.shape[1]):
-        all_cells[:, i] = convolve(all_cells[:, i], kernel, method='full')[:all_cells.shape[0]]
+        all_cells[:, i] = convolve(all_cells[:, i], kernel, mode='full')[:all_cells.shape[0]]
     f_on_data = a.trial_average(all_cells[:, clust_ids == fast_on_like], 3).T
     s_on_data = a.trial_average(all_cells[:, clust_ids == slow_on_like], 3).T
     f_off_data = a.trial_average(all_cells[:, clust_ids == fast_off_like], 3).T

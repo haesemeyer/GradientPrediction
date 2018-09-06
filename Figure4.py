@@ -126,9 +126,9 @@ if __name__ == "__main__":
     kernel = kernel / kernel.sum()
     # convolve with our kernel
     for i in range(all_cells_zf.shape[1]):
-        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, mode='full')[:all_cells_zf.shape[0]]
     for i in range(all_cells_ce.shape[1]):
-        all_cells_ce[:, i] = convolve(all_cells_ce[:, i], kernel, method='full')[:all_cells_ce.shape[0]]
+        all_cells_ce[:, i] = convolve(all_cells_ce[:, i], kernel, mode='full')[:all_cells_ce.shape[0]]
 
     # Panel 6: Gradient navigation performance of C elegans model
     bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)
@@ -168,7 +168,7 @@ if __name__ == "__main__":
         cells_ce_step.append(cell_res)
     cells_ce_step = np.hstack(cells_ce_step)
     for i in range(cells_ce_step.shape[1]):
-        cells_ce_step[:, i] = convolve(cells_ce_step[:, i], kernel, method='full')[:cells_ce_step.shape[0]]
+        cells_ce_step[:, i] = convolve(cells_ce_step[:, i], kernel, mode='full')[:cells_ce_step.shape[0]]
     afd_data = cells_ce_step[:, clust_ids_ce == afd_like].T
     awc_data = cells_ce_step[:, clust_ids_ce == awc_like].T
     trial_time = np.arange(cells_ce_step.shape[0]) / GlobalDefs.frame_rate

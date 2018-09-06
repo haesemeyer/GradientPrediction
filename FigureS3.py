@@ -130,9 +130,9 @@ if __name__ == "__main__":
     kernel = kernel / kernel.sum()
     # convolve with our kernel
     for i in range(all_cells_th.shape[1]):
-        all_cells_th[:, i] = convolve(all_cells_th[:, i], kernel, method='full')[:all_cells_th.shape[0]]
+        all_cells_th[:, i] = convolve(all_cells_th[:, i], kernel, mode='full')[:all_cells_th.shape[0]]
     for i in range(all_cells_zf.shape[1]):
-        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, mode='full')[:all_cells_zf.shape[0]]
 
     # load cluster data from file
     clust_ids_th = a.cluster_activity(8, all_cells_th, "cluster_info_tanh.hdf5")[0]

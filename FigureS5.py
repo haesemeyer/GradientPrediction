@@ -86,9 +86,9 @@ if __name__ == "__main__":
     kernel = kernel / kernel.sum()
     # convolve with our kernel
     for i in range(all_cells_zf.shape[1]):
-        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, method='full')[:all_cells_zf.shape[0]]
+        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, mode='full')[:all_cells_zf.shape[0]]
     for i in range(all_cells_ce.shape[1]):
-        all_cells_ce[:, i] = convolve(all_cells_ce[:, i], kernel, method='full')[:all_cells_ce.shape[0]]
+        all_cells_ce[:, i] = convolve(all_cells_ce[:, i], kernel, mode='full')[:all_cells_ce.shape[0]]
     trial_time = np.arange(all_cells_zf.shape[0] // 3) / GlobalDefs.frame_rate
 
     # plot colors
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         cells_ce_step.append(cell_res)
     cells_ce_step = np.hstack(cells_ce_step)
     for i in range(cells_ce_step.shape[1]):
-        cells_ce_step[:, i] = convolve(cells_ce_step[:, i], kernel, method='full')[:cells_ce_step.shape[0]]
+        cells_ce_step[:, i] = convolve(cells_ce_step[:, i], kernel, mode='full')[:cells_ce_step.shape[0]]
 
     # panel - all cluster activities, sorted into ON and OFF types
     n_regs = np.unique(clust_ids_ce).size - 1
