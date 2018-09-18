@@ -85,11 +85,6 @@ if __name__ == "__main__":
     std_ce = c.GradientData.load_standards("ce_gd_training_data.hdf5")
     ana_ce = a.Analyzer(MoTypes(True), std_ce, "ce_sim_store.hdf5", "ce_activity_store.hdf5")
 
-    # load activity clusters from file
-    clfile = h5py.File("ce_cluster_info.hdf5", "r")
-    clust_ids_ce = np.array(clfile["clust_ids"])
-    clfile.close()
-
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
@@ -129,6 +124,9 @@ if __name__ == "__main__":
         all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, mode='full')[:all_cells_zf.shape[0]]
     for i in range(all_cells_ce.shape[1]):
         all_cells_ce[:, i] = convolve(all_cells_ce[:, i], kernel, mode='full')[:all_cells_ce.shape[0]]
+
+    # load activity clusters from file or create if necessary
+    clust_ids_ce = a.cluster_activity(8, all_cells_ce, "cluster_info.hdf5")[0]
 
     # Panel 6: Gradient navigation performance of C elegans model
     bns = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 100)

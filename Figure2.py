@@ -46,11 +46,6 @@ if __name__ == "__main__":
     # for clusters we identify in fish - their indices
     int_off = 2
 
-    # load activity clusters from file
-    clfile = h5py.File("cluster_info.hdf5", "r")
-    clust_ids = np.array(clfile["clust_ids"])
-    clfile.close()
-
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
@@ -80,6 +75,9 @@ if __name__ == "__main__":
     # convolve with our kernel
     for i in range(all_cells.shape[1]):
         all_cells[:, i] = convolve(all_cells[:, i], kernel, mode='full')[:all_cells.shape[0]]
+
+    # load activity clusters from file or create if necessary
+    clust_ids = a.cluster_activity(8, all_cells, "cluster_info.hdf5")[0]
     f_on_data = a.trial_average(all_cells[:, clust_ids == fast_on_like], 3).T
     s_on_data = a.trial_average(all_cells[:, clust_ids == slow_on_like], 3).T
     f_off_data = a.trial_average(all_cells[:, clust_ids == fast_off_like], 3).T
