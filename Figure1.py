@@ -95,6 +95,8 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder+"test_errors.pdf", type="pdf")
 
+    print("Prediction error: {0} C +/- {1} C".format(np.mean(test_512[:, -10:]), np.std(test_512[:, -10:])))
+
     # second panel - population average temperature error progression during evolution
     errors = np.empty((len(paths_512), 50))
     for i, p in enumerate(paths_512):
@@ -152,9 +154,9 @@ if __name__ == "__main__":
         pos_e = ana.run_simulation(mpath(p), "r", "bfevolve")
         evolved_errors.append(a.temp_error(pos_e, 'r'))
         evolved[i, :] = a.bin_simulation(pos_e, bns, "r")
-    print("Naive erorr = {0} C".format(np.mean(naive_errors)))
-    print("Trained erorr = {0} C".format(np.mean(trained_errors)))
-    print("Evolved erorr = {0} C".format(np.mean(evolved_errors)))
+    print("Naive erorr = {0} C +/- {1} C".format(np.mean(naive_errors), np.std(naive_errors)))
+    print("Trained erorr = {0} C +/- {1} C".format(np.mean(trained_errors), np.std(trained_errors)))
+    print("Evolved erorr = {0} C +/- {1} C".format(np.mean(evolved_errors), np.std(evolved_errors)))
     fig, ax = pl.subplots()
     sns.tsplot(naive, centers, n_boot=1000, condition="Naive", color='k')
     sns.tsplot(trained, centers, n_boot=1000, condition="Trained", color="C1")
