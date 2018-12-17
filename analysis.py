@@ -267,31 +267,51 @@ def behavior_by_delta_temp(db_dict: dict, bins: np.ndarray):
     return result
 
 
-def _cluster_responses(response_mat, n_clusters, corr_cut=0.6):
+def _cluster_responses(response_mat, n_clusters, avg_trials, mem_save, corr_cut=0.6):
     """
     Clusters the neuron responses using spectral clustering
     :param response_mat: The response matrix with all neuron responses
     :param n_clusters: The desired number of clusters
+    :param avg_trials: If True, perform 3-trial averaging on response_mat input
+    :param mem_save: If > 0 compute initial clustering on mem_save-fold random subset of data
     :param corr_cut: The correlation cutoff to consider a given neuron to be part of a cluster
     :return:
         [0]: The cluster ids
         [1]: 3D embedding coordinates for plotting
     """
-    # create trial average
-    response_mat = trial_average(response_mat, 3)
+    if avg_trials:
+        # create trial average
+        response_mat = trial_average(response_mat, 3)
     # compute pairwise correlations
-    pw_corrs = np.corrcoef(response_mat.T)
-    pw_corrs[np.isnan(pw_corrs)] = 0
-    pw_corrs[pw_corrs < 0.2] = 0
-    # perform spectral clustering
-    spec_clust = SpectralClustering(n_clusters, affinity="precomputed")
-    clust_ids = spec_clust.fit_predict(pw_corrs)
-    spec_emb = SpectralEmbedding(3, affinity="precomputed")
-    coords = spec_emb.fit_transform(pw_corrs)
-    # use correlation to cluster centroids to determine final cluster membership
-    regressors = np.zeros((response_mat.shape[0], n_clusters))
-    for i in range(n_clusters):
-        regressors[:, i] = np.mean(response_mat[:, clust_ids == i], 1)
+    if mem_save > 0:
+        sampler = np.random.rand(response_mat.shape[1])
+        sample = response_mat[:, sampler < 1/mem_save].copy()
+        pw_corrs = np.corrcoef(sample.T)
+        pw_corrs[np.isnan(pw_corrs)] = 0
+        pw_corrs[pw_corrs < 0.2] = 0
+        # perform spectral clustering
+        spec_clust = SpectralClustering(n_clusters, affinity="precomputed")
+        spec_clust_ids = spec_clust.fit_predict(pw_corrs)
+        spec_emb = SpectralEmbedding(3, affinity="precomputed")
+        coords = spec_emb.fit_transform(pw_corrs)
+        # use correlation to cluster centroids to determine final cluster membership
+        regressors = np.zeros((response_mat.shape[0], n_clusters))
+        for i in range(n_clusters):
+            regressors[:, i] = np.mean(sample[:, spec_clust_ids == i], 1)
+    else:
+        pw_corrs = np.corrcoef(response_mat.T)
+        pw_corrs[np.isnan(pw_corrs)] = 0
+        pw_corrs[pw_corrs < 0.2] = 0
+        # perform spectral clustering
+        spec_clust = SpectralClustering(n_clusters, affinity="precomputed")
+        spec_clust_ids = spec_clust.fit_predict(pw_corrs)
+        spec_emb = SpectralEmbedding(3, affinity="precomputed")
+        coords = spec_emb.fit_transform(pw_corrs)
+        # use correlation to cluster centroids to determine final cluster membership
+        regressors = np.zeros((response_mat.shape[0], n_clusters))
+        for i in range(n_clusters):
+            regressors[:, i] = np.mean(response_mat[:, spec_clust_ids == i], 1)
+    clust_ids = np.full(response_mat.shape[1], np.nan)
     for i in range(response_mat.shape[1]):
         max_ix = -1
         max_corr = 0
@@ -304,7 +324,7 @@ def _cluster_responses(response_mat, n_clusters, corr_cut=0.6):
     return clust_ids, coords
 
 
-def cluster_activity(n_regs, all_cells, cluster_file=None):
+def cluster_activity(n_regs, all_cells, cluster_file=None, avg_trials=True, mem_save=0):
     clust_ids, coords = None, None
     load_success = False
     if cluster_file is not None and os.path.exists(cluster_file):
@@ -313,12 +333,13 @@ def cluster_activity(n_regs, all_cells, cluster_file=None):
         if np.array(clfile["n_regs"]) == n_regs:
             clust_ids = np.array(clfile["clust_ids"])
             coords = np.array(clfile["coords"])
-            # ensure that the same number of cells was clustered
-            if clust_ids.size == coords.shape[0] and clust_ids.size == all_cells.shape[1]:
+            # ensure that the same number of cells was clustered - don't check coords as they may
+            # be subsampled
+            if clust_ids.size == all_cells.shape[1]:
                 load_success = True
         clfile.close()
     if not load_success:
-        clust_ids, coords = _cluster_responses(all_cells, n_regs)
+        clust_ids, coords = _cluster_responses(all_cells, n_regs, avg_trials, mem_save)
         if cluster_file is not None:
             clfile = h5py.File(cluster_file, "w")
             clfile.create_dataset("n_regs", data=n_regs)
