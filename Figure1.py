@@ -17,6 +17,7 @@ import numpy as np
 import h5py
 from data_stores import SimulationStore
 from mo_types import MoTypes
+from pandas import DataFrame
 
 
 # file definitions
@@ -241,3 +242,31 @@ if __name__ == "__main__":
     ax.set_ylabel("Proportion")
     sns.despine(fig, ax)
     fig.savefig(save_folder+"gradient_distribution.pdf", type="pdf")
+
+    # fifth panel - turning modulation by previous bout direction
+    # load real fish gradient data
+    dfile = h5py.File("fish_rgrad_data.hdf5", 'r')
+    fish_down = np.array(dfile["dn_change"])
+    fish_up = np.array(dfile["up_change"])
+    data_dict = {"Type": [], "Direction": [], "Turn Enhancement": []}
+    for fd in fish_down:
+        data_dict["Type"].append("zebrafish")
+        data_dict["Direction"].append("down")
+        data_dict["Turn Enhancement"].append(fd)
+    for fu in fish_up:
+        data_dict["Type"].append("zebrafish")
+        data_dict["Direction"].append("up")
+        data_dict["Turn Enhancement"].append(fu)
+    # compute same quantities across our networks
+    net_down = []
+    net_up = []
+    for p in paths_512:
+        dn, up = compute_da_modulation(mpath(p))
+        data_dict["Type"] += ["Network", "Network"]
+        data_dict["Direction"] += ["down", "up"]
+        data_dict["Turn Enhancement"] += [dn, up]
+    data_frame = DataFrame(data_dict)
+    fig, ax = pl.subplots()
+    sns.barplot("Type", "Turn Enhancement", "Direction", data_frame, ["zebrafish", "Network"], ["down", "up"], ci=68)
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "grad_turn_modulation.pdf", type="pdf")
