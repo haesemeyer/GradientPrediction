@@ -44,11 +44,37 @@ def mpath(path):
     return base_path + path[:-1]  # need to remove trailing slash
 
 
+def get_bout_starts(pos: np.ndarray) -> np.ndarray:
+    """
+    Extract bout starts from network position trace
+    :param pos: nx3 trace of x, y, angle at each timepoint
+    :return: Array of indices corresponding to bout starts
+    """
+    spd = np.r_[0, np.sqrt(np.sum(np.diff(pos[:, :2], axis=0) ** 2, 1))]  # speed
+    bs = np.r_[0, np.diff(spd) > 0.00098]  # bout starts
+    return bs
+
+
+def get_bout_da(pos: np.ndarray, starts: np.ndarray) -> np.ndarray:
+    """
+    For each bout indicated by starts get the angle turned
+    :param pos: nx3 trace of x, y, angle at each timepoint
+    :param starts: Array of indices corresponding to bout starts
+    :return: For each bout in starts the turning angle
+    """
+    starts = np.arange(pos.shape[0])[starts.astype(bool)]
+    ix_pre = starts - 10
+    ix_pre[ix_pre < 0] = 0
+    ix_post = starts + 10
+    ix_post[ix_post >= pos.shape[0]] = pos.shape[0]-1
+    da = pos[ix_post, 2] - pos[ix_pre, 2]
+    return da
+
+
 def compute_gradient_bout_frequency(model_path, drop_list=None):
     def bout_freq(pos: np.ndarray):
         r = np.sqrt(np.sum(pos[:, :2]**2, 1))  # radial position
-        spd = np.r_[0, np.sqrt(np.sum(np.diff(pos[:, :2], axis=0) ** 2, 1))]  # speed
-        bs = np.r_[0, np.diff(spd) > 0.00098]  # bout starts
+        bs = get_bout_starts(pos)  # bout starts
         bins = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 6)
         bcenters = bins[:-1] + np.diff(bins)/2
         cnt_r = np.histogram(r, bins)[0]
@@ -64,6 +90,54 @@ def compute_gradient_bout_frequency(model_path, drop_list=None):
     bf_p, bc = bout_freq(pos_part)
     bf_var, bc = bout_freq(pos_var)
     return bc, bf_fixed, bf_p, bf_var
+
+
+def run_flat_gradient(model_path, drop_list=None):
+    mdata = c.ModelData(model_path)
+    gpn = MoTypes(False).network_model()
+    gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+    flt_params = GlobalDefs.circle_sim_params.copy()
+    flt_params["t_max"] = flt_params["t_min"]
+    sim = MoTypes(False).rad_sim(gpn, std, **flt_params)
+    sim.t_max = sim.t_min  # reset gradient to be flat
+    sim.remove = drop_list
+    evo_path = model_path + '/evolve/generation_weights.npy'
+    evo_weights = np.load(evo_path)
+    w = np.mean(evo_weights[-1, :, :], 0)
+    sim.bf_weights = w
+    return sim.run_simulation(GlobalDefs.n_steps, False)
+
+
+def compute_da_modulation(model_path, drop_list=None):
+    with SimulationStore("sim_store.hdf5", std, MoTypes(False)) as sim_store:
+        pos_ev = sim_store.get_sim_pos(model_path, "r", "bfevolve", drop_list)
+    pos_flt = run_flat_gradient(model_path, drop_list)
+    bs_ev = get_bout_starts(pos_ev)
+    bs_flt = get_bout_starts(pos_flt)
+    # get delta angle of each bout
+    da_ev = get_bout_da(pos_ev, bs_ev)
+    da_flt = get_bout_da(pos_flt, bs_flt)
+    # get temperature at each bout start
+    temp_ev = a.temp_convert(np.sqrt(np.sum(pos_ev[bs_ev.astype(bool), :2]**2, 1)), 'r')
+    temp_flt = a.temp_convert(np.sqrt(np.sum(pos_flt[bs_flt.astype(bool), :2] ** 2, 1)), 'r')
+    # get delta-temperature effected by each bout
+    dt_ev = np.r_[0, np.diff(temp_ev)]
+    dt_flt = np.r_[0, np.diff(temp_flt)]
+    # only consider data above T_Preferred and away from the edge
+    valid_ev = np.logical_and(temp_ev > GlobalDefs.tPreferred, temp_ev < GlobalDefs.circle_sim_params["t_max"]-1)
+    valid_flt = np.logical_and(temp_flt > GlobalDefs.tPreferred, temp_flt < GlobalDefs.circle_sim_params["t_max"] - 1)
+    da_ev = da_ev[valid_ev]
+    da_flt = da_flt[valid_flt]
+    dt_ev = dt_ev[valid_ev]
+    dt_flt = dt_flt[valid_flt]
+    # get turn magnitude for up and down gradient
+    up_grad_ev = np.mean(np.abs(da_ev[dt_ev > 0.5]))
+    dn_grad_ev = np.mean(np.abs(da_ev[dt_ev < -0.5]))
+    up_grad_flt = np.mean(np.abs(da_flt[dt_flt > 0.5]))
+    dn_grad_flt = np.mean(np.abs(da_flt[dt_flt < -0.5]))
+    up_change = up_grad_ev / up_grad_flt
+    dn_change = dn_grad_ev / dn_grad_flt
+    return dn_change, up_change
 
 
 if __name__ == "__main__":
