@@ -18,6 +18,7 @@ import h5py
 from data_stores import SimulationStore
 from mo_types import MoTypes
 from pandas import DataFrame
+from scipy.stats import wilcoxon
 
 
 # file definitions
@@ -248,6 +249,7 @@ if __name__ == "__main__":
     dfile = h5py.File("fish_rgrad_data.hdf5", 'r')
     fish_down = np.array(dfile["dn_change"])
     fish_up = np.array(dfile["up_change"])
+    dfile.close()
     data_dict = {"Type": [], "Direction": [], "Turn Enhancement": []}
     for fd in fish_down:
         data_dict["Type"].append("zebrafish")
@@ -262,11 +264,16 @@ if __name__ == "__main__":
     net_up = []
     for p in paths_512:
         dn, up = compute_da_modulation(mpath(p))
+        net_down.append(dn)
+        net_up.append(up)
         data_dict["Type"] += ["Network", "Network"]
         data_dict["Direction"] += ["down", "up"]
         data_dict["Turn Enhancement"] += [dn, up]
     data_frame = DataFrame(data_dict)
     fig, ax = pl.subplots()
     sns.barplot("Type", "Turn Enhancement", "Direction", data_frame, ["zebrafish", "Network"], ["down", "up"], ci=68)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5])
     sns.despine(fig, ax)
     fig.savefig(save_folder + "grad_turn_modulation.pdf", type="pdf")
+    print("Fish comparison. Wilcoxon statistic {0}; p-value {1}".format(*wilcoxon(fish_down, fish_up)))
+    print("Network comparison. Wilcoxon statistic {0}; p-value {1}".format(*wilcoxon(net_down, net_up)))
