@@ -690,6 +690,8 @@ class WhiteNoiseSimulation(TemperatureArena):
         self.remove = None
         # optionally weights that will transform the output of the temperature branch of the model into a bout frequency
         self.bf_weights = None
+        # to allow for more frequent evaluation of bout frequency in evolved case make this member variable
+        self.eval_every = 20
 
     # Private API
     def _get_bout_probability(self, model_in):
@@ -755,7 +757,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         p_eval = self.p_move
         while step < stimulus.size:
             # update our movement probability if necessary
-            if step - last_p_move_evaluation >= 20:
+            if step - last_p_move_evaluation >= self.eval_every:
                 model_in[0, 0, :, 0] = stimulus[step - history:step]
                 p_eval = self._get_bout_probability(model_in)
                 last_p_move_evaluation = step
