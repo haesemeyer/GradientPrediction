@@ -682,6 +682,8 @@ class WhiteNoiseSimulation(TemperatureArena):
         self.ang_mean = stds.ang_mean
         self.ang_std = stds.ang_std
         self.btypes = ["N", "S", "L", "R"]
+        # for unit kernel computations save standards
+        self.std = stds
         # stimulus switching variables - if switch_mean<=0 then stimulus will be truly white, alternating randomly at
         # every frame. Otherwise switching times will be drawn from gaussian with mean switch_mean and sigma switch_std
         self.switch_mean = 0
@@ -736,6 +738,31 @@ class WhiteNoiseSimulation(TemperatureArena):
             return self.btypes[ranks[2]]
         else:
             return self.btypes[ranks[3]]
+
+    def _generate_white_noise(self, n_samples):
+        """
+        Generates a white noise stimulus according to class parameters
+        :param n_samples: The number of samples to generate
+        :return: The generated stimulus
+        """
+        if self.switch_mean <= 0:
+            stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
+        else:
+            stim = np.zeros(int(n_samples))
+            counter = 0
+            switch_count = 0
+            last_val = np.random.randn() * self.stim_std + self.stim_mean
+            while counter < stim.size:
+                if switch_count <= 0:
+                    last_val = np.random.randn() * self.stim_std + self.stim_mean
+                    switch_count = -1
+                    while switch_count < 0:
+                        switch_count = np.random.randn() * self.switch_std + self.switch_mean
+                else:
+                    switch_count -= 1
+                stim[counter] = last_val
+                counter += 1
+        return stim
 
     # Public API
     def compute_openloop_behavior(self, stimulus: np.ndarray):
@@ -810,25 +837,46 @@ class WhiteNoiseSimulation(TemperatureArena):
             ixm = indexing_matrix(indices, GlobalDefs.hist_seconds*GlobalDefs.frame_rate, GlobalDefs.frame_rate,
                                   int(n_samples))[0]
             return np.mean(stim[ixm]-np.mean(stim), 0)
-        if self.switch_mean <= 0:
-            stim = np.random.randn(int(n_samples)) * self.stim_std + self.stim_mean
-        else:
-            stim = np.zeros(int(n_samples))
-            counter = 0
-            switch_count = 0
-            last_val = np.random.randn() * self.stim_std + self.stim_mean
-            while counter < stim.size:
-                if switch_count <= 0:
-                    last_val = np.random.randn() * self.stim_std + self.stim_mean
-                    switch_count = -1
-                    while switch_count < 0:
-                        switch_count = np.random.randn() * self.switch_std + self.switch_mean
-                else:
-                    switch_count -= 1
-                stim[counter] = last_val
-                counter += 1
+
+        stim = self._generate_white_noise(n_samples)
         btype_trace = self.compute_openloop_behavior(stim)[0]
         return kernel(0), kernel(1), kernel(2), kernel(3)
+
+    def compute_behav_trig_activity(self, n_samples=1e6):
+        """
+        Generates white-noise samples, presenting them as an open-loop stimulus and extracting behavior triggered
+        unit activity averages for network units
+        :param n_samples: The number of white-noise samples to use
+        :return:
+            Nested dictionary with keys for each bout type (0-3) and a network branch index dictionary for each key
+            containing a list of layer unit kernels.
+        """
+        def kernel(t, u_response):
+            indices = np.arange(n_samples)[btype == t]
+            ixm = indexing_matrix(indices, GlobalDefs.hist_seconds*GlobalDefs.frame_rate, GlobalDefs.frame_rate,
+                                  int(n_samples))[0]
+            return np.mean(u_response[ixm]-np.mean(u_response), 0)
+
+        stim = self._generate_white_noise(n_samples)
+        btype, speed, angle = self.compute_openloop_behavior(stim)
+        # dictionary, indexed by branches, with list for each branch with n-layers entries of stim x n_units activations
+        unit_dict = self.model.unit_stimulus_responses(stim, speed, angle, self.std)
+        # for each unit, compute it's kernels - HIST_SECONDS*FRAME_RATE into the past and FRAME_RATE into the future
+        # one kernel for each behavior type
+        k_size = -1
+        kernel_dict = {bt: {} for bt in range(4)}
+        for bt in range(4):
+            for b_name in unit_dict:
+                if b_name not in kernel_dict[bt]:
+                    kernel_dict[bt][b_name] = []
+                for layer_act in unit_dict[b_name]:
+                    if k_size == -1:
+                        k_size = kernel(0, stim).size
+                    layer_kernels = np.zeros((k_size, layer_act.shape[1]))
+                    for uix in range(layer_act.shapep[1]):
+                        layer_kernels[:, uix] = kernel(bt, layer_act[:, uix])
+                    kernel_dict[bt][b_name].append(layer_kernels)
+        return kernel_dict
 
 
 class BoutFrequencyEvolver(CircleGradSimulation):
