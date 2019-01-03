@@ -224,7 +224,7 @@ if __name__ == "__main__":
         m_path = mpath(base_path_zf, p)
         mdata_wn = c.ModelData(m_path)
         gpn_wn = mo.network_model()
-        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.FirstCheckpoint)
+        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
         wna = mo.wn_sim(std_zf, gpn_wn, stim_std=2)
         wna.switch_mean = 5
         wna.switch_std = 1
