@@ -228,6 +228,10 @@ if __name__ == "__main__":
         wna = mo.wn_sim(std_zf, gpn_wn, stim_std=2)
         wna.switch_mean = 5
         wna.switch_std = 1
+        ev_path = m_path + '/evolve/generation_weights.npy'
+        weights = np.load(ev_path)
+        w = np.mean(weights[-1, :, :], 0)
+        wna.bf_weights = w
         all_triggered_units = wna.compute_behav_trig_activity(1000000)
         all_units_straight += all_triggered_units[1]['t']  # only use units in temperature branch
         left = all_triggered_units[2]['t']
