@@ -854,7 +854,7 @@ class WhiteNoiseSimulation(TemperatureArena):
         def kernel(t, u_response):
             indices = np.arange(n_samples)[btype == t]
             ixm = indexing_matrix(indices, GlobalDefs.hist_seconds*GlobalDefs.frame_rate, GlobalDefs.frame_rate,
-                                  int(n_samples))[0]
+                                  u_response.size)[0]
             return np.mean(u_response[ixm]-np.mean(u_response), 0)
 
         stim = self._generate_white_noise(n_samples)
@@ -873,7 +873,7 @@ class WhiteNoiseSimulation(TemperatureArena):
                     if k_size == -1:
                         k_size = kernel(0, stim).size
                     layer_kernels = np.zeros((k_size, layer_act.shape[1]))
-                    for uix in range(layer_act.shapep[1]):
+                    for uix in range(layer_act.shape[1]):
                         layer_kernels[:, uix] = kernel(bt, layer_act[:, uix])
                     kernel_dict[bt][b_name].append(layer_kernels)
         return kernel_dict
