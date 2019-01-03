@@ -216,9 +216,30 @@ if __name__ == "__main__":
     sns.despine(fig)
     fig.savefig(save_folder + "on_off_type_activity.pdf", type="pdf")
 
+    # panels - behavior triggered cluster averages during white noise
+    mo = MoTypes(False)
+    all_units_straight = []
+    all_units_turn = []
+    for p in paths_512_zf:
+        m_path = mpath(base_path_zf, p)
+        mdata_wn = c.ModelData(m_path)
+        gpn_wn = mo.network_model()
+        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.FirstCheckpoint)
+        wna = mo.wn_sim(std_zf, gpn_wn, stim_std=2)
+        wna.switch_mean = 5
+        wna.switch_std = 1
+        all_triggered_units = wna.compute_behav_trig_activity(1000000)
+        all_units_straight += all_triggered_units[1]['t']  # only use units in temperature branch
+        left = all_triggered_units[2]['t']
+        right = all_triggered_units[3]['t']
+        all_units_turn += [l+r for (l, r) in zip(left, right)]
+    all_units_straight = np.hstack(all_units_straight)
+    all_units_turn = np.hstack(all_units_turn)
+    assert all_units_straight.shape[1] == clust_ids_zf.size
+    assert all_units_turn.shape[1] == clust_ids_zf.size
+
     raise Exception("Skipping white noise analysis to save time")
     # panel 1 - white noise analysis on naive networks
-    mo = MoTypes(False)
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]
     for p in paths_512_zf:
