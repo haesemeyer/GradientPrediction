@@ -842,25 +842,36 @@ class WhiteNoiseSimulation(TemperatureArena):
         btype_trace = self.compute_openloop_behavior(stim)[0]
         return kernel(0), kernel(1), kernel(2), kernel(3)
 
-    def compute_behav_trig_activity(self, n_samples=1e6):
+    def compute_behav_trig_activity(self, n_samples=1e6, stim=None):
         """
         Generates white-noise samples, presenting them as an open-loop stimulus and extracting behavior triggered
         unit activity averages for network units
         :param n_samples: The number of white-noise samples to use
+        :param stim: Optional stimulus, otherwise white noise samples will be generated
         :return:
             Nested dictionary with keys for each bout type (0-3) and a network branch index dictionary for each key
             containing a list of layer unit kernels.
         """
         def kernel(t, u_response):
+            if u_response.size != n_samples:
+                raise ValueError("Got wrong response length")
             indices = np.arange(n_samples)[btype == t]
             ixm = indexing_matrix(indices, GlobalDefs.hist_seconds*GlobalDefs.frame_rate, GlobalDefs.frame_rate,
-                                  u_response.size)[0]
+                                  int(n_samples))[0]
             return np.mean(u_response[ixm]-np.mean(u_response), 0)
 
-        stim = self._generate_white_noise(n_samples)
+        if stim is None:
+            stim = self._generate_white_noise(n_samples)
+        else:
+            n_samples = stim.size
         btype, speed, angle = self.compute_openloop_behavior(stim)
+        # NOTE: To align activity and behavior traces, need to provide lead-in!!!
+        lead_in = np.zeros(self.model.input_dims[2] - 1)
+        # NOTE: Computing unit_stimulus_responses re-standardadizes temperature below - so re-conver to celsius first!
+        stim = stim.copy()*self.std.temp_std + self.std.temp_mean
         # dictionary, indexed by branches, with list for each branch with n-layers entries of stim x n_units activations
-        unit_dict = self.model.unit_stimulus_responses(stim, speed, angle, self.std)
+        unit_dict = self.model.unit_stimulus_responses(np.r_[lead_in, stim], np.r_[lead_in, speed],
+                                                       np.r_[lead_in, angle], self.std)
         # for each unit, compute it's kernels - HIST_SECONDS*FRAME_RATE into the past and FRAME_RATE into the future
         # one kernel for each behavior type
         k_size = -1
