@@ -20,6 +20,7 @@ from global_defs import GlobalDefs
 from pandas import DataFrame
 from Figure4 import mpath
 from scipy.signal import convolve
+from multiprocessing import Pool
 
 
 # file definitions
@@ -78,6 +79,25 @@ def compute_white_noise(base_freq):
         behav_kernels[n] = np.vstack(behav_kernels[n])
     plot_kernel = (behav_kernels["straight"] + behav_kernels["left"] + behav_kernels["right"]) / 3
     return time, plot_kernel
+
+
+def unit_wn_helper(mo_type, model_path, std, nsamples):
+    md_wn = c.ModelData(model_path)
+    gpn_wnsim = mo_type.network_model()
+    gpn_wnsim.load(md_wn.ModelDefinition, md_wn.LastCheckpoint)
+    wnsim = mo_type.wn_sim(std, gpn_wnsim, stim_std=2)
+    wnsim.switch_mean = 5
+    wnsim.switch_std = 1
+    ev_path = model_path + '/evolve/generation_weights.npy'
+    ev_weights = np.load(ev_path)
+    wts = np.mean(ev_weights[-1, :, :], 0)
+    wnsim.bf_weights = wts
+    all_triggered_units = wnsim.compute_behav_trig_activity(nsamples)
+    units_straight = all_triggered_units[1]['t']  # only use units in temperature branch
+    left = all_triggered_units[2]['t']
+    right = all_triggered_units[3]['t']
+    units_turn = [l + r for (l, r) in zip(left, right)]
+    return units_straight, units_turn
 
 
 if __name__ == "__main__":
@@ -216,33 +236,80 @@ if __name__ == "__main__":
     sns.despine(fig)
     fig.savefig(save_folder + "on_off_type_activity.pdf", type="pdf")
 
+    raise Exception("Skipping white noise analysis to save time")
     # panels - behavior triggered cluster averages during white noise
     mo = MoTypes(False)
     all_units_straight = []
     all_units_turn = []
-    for p in paths_512_zf:
+    for i, p in enumerate(paths_512_zf):
         m_path = mpath(base_path_zf, p)
-        mdata_wn = c.ModelData(m_path)
-        gpn_wn = mo.network_model()
-        gpn_wn.load(mdata_wn.ModelDefinition, mdata_wn.LastCheckpoint)
-        wna = mo.wn_sim(std_zf, gpn_wn, stim_std=2)
-        wna.switch_mean = 5
-        wna.switch_std = 1
-        ev_path = m_path + '/evolve/generation_weights.npy'
-        weights = np.load(ev_path)
-        w = np.mean(weights[-1, :, :], 0)
-        wna.bf_weights = w
-        all_triggered_units = wna.compute_behav_trig_activity(1000000)
-        all_units_straight += all_triggered_units[1]['t']  # only use units in temperature branch
-        left = all_triggered_units[2]['t']
-        right = all_triggered_units[3]['t']
-        all_units_turn += [l+r for (l, r) in zip(left, right)]
+        # NOTE: Due to high memory requirements unfortunately need to accumulate this all serially...
+        straight, turn = unit_wn_helper(mo, m_path, std_zf, 250000)
+        for rep in range(19):
+            st, tu = unit_wn_helper(mo, m_path, std_zf, 250000)
+            for lix in range(len(straight)):
+                straight[lix] = (straight[lix] + st[lix])/2
+                turn[lix] = (turn[lix] + tu[lix])/2
+        all_units_straight += straight
+        all_units_turn += turn
+        print("Network {0} of {1} completed".format(i+1, len(paths_512_zf)))
     all_units_straight = np.hstack(all_units_straight)
     all_units_turn = np.hstack(all_units_turn)
-    assert all_units_straight.shape[1] == clust_ids_zf.size
-    assert all_units_turn.shape[1] == clust_ids_zf.size
+    # plot kernels for our unit types - NOTE: Assignments below are retrieved via zf_ann_correspondence.py except
+    # for 'integrating OFF' which is determined via brain wide unit correlations (also see Figure2)
+    fast_on_like = 4
+    slow_on_like = 5
+    fast_off_like = 1
+    slow_off_like = 3
+    int_off = 2
+    kernel_time = np.linspace(-4, 1, all_units_straight.shape[0])
+    fig, ax = pl.subplots()
+    sns.tsplot(all_units_turn[:, clust_ids_zf == fast_on_like].T, kernel_time, n_boot=1000, color="C0", ax=ax)
+    sns.tsplot(all_units_straight[:, clust_ids_zf == fast_on_like].T, kernel_time, n_boot=1000, color="C1", ax=ax)
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.001, 0.001], 'k--', lw=0.25)
+    ax.set_ylabel("Activation")
+    ax.set_xlabel("Time around bout [s]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "behav_triggered_FastON.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    sns.tsplot(all_units_turn[:, clust_ids_zf == slow_on_like].T, kernel_time, n_boot=1000, color="C0", ax=ax)
+    sns.tsplot(all_units_straight[:, clust_ids_zf == slow_on_like].T, kernel_time, n_boot=1000, color="C1", ax=ax)
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.001, 0.001], 'k--', lw=0.25)
+    ax.set_ylabel("Activation")
+    ax.set_xlabel("Time around bout [s]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "behav_triggered_SlowON.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    sns.tsplot(all_units_turn[:, clust_ids_zf == fast_off_like].T, kernel_time, n_boot=1000, color="C0", ax=ax)
+    sns.tsplot(all_units_straight[:, clust_ids_zf == fast_off_like].T, kernel_time, n_boot=1000, color="C1", ax=ax)
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.001, 0.001], 'k--', lw=0.25)
+    ax.set_ylabel("Activation")
+    ax.set_xlabel("Time around bout [s]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "behav_triggered_FastOFF.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    sns.tsplot(all_units_turn[:, clust_ids_zf == slow_off_like].T, kernel_time, n_boot=1000, color="C0", ax=ax)
+    sns.tsplot(all_units_straight[:, clust_ids_zf == slow_off_like].T, kernel_time, n_boot=1000, color="C1", ax=ax)
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.001, 0.001], 'k--', lw=0.25)
+    ax.set_ylabel("Activation")
+    ax.set_xlabel("Time around bout [s]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "behav_triggered_SlowOFF.pdf", type="pdf")
+    fig.savefig(save_folder + "behav_triggered_FastOFF.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    sns.tsplot(all_units_turn[:, clust_ids_zf == int_off].T, kernel_time, n_boot=1000, color="C0", ax=ax)
+    sns.tsplot(all_units_straight[:, clust_ids_zf == int_off].T, kernel_time, n_boot=1000, color="C1", ax=ax)
+    ax.plot([kernel_time.min(), kernel_time.max()], [0, 0], 'k--', lw=0.25)
+    ax.plot([0, 0], [-0.001, 0.001], 'k--', lw=0.25)
+    ax.set_ylabel("Activation")
+    ax.set_xlabel("Time around bout [s]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "behav_triggered_IntOFF.pdf", type="pdf")
 
-    raise Exception("Skipping white noise analysis to save time")
     # panel 1 - white noise analysis on naive networks
     behav_kernels = {}
     k_names = ["stay", "straight", "left", "right"]
