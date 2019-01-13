@@ -1044,6 +1044,7 @@ class SimpleRLNetwork(NetworkModel):
         # network output
         self._value_out = None  # type: tf.Tensor
         self._log_value_out = None  # type: tf.Tensor
+        self._action = None  # type: tf.Tensor
         # the reward based loss (loss w.o. weight decay)
         self._loss = None  # type: tf.Tensor
         # total loss across the network
@@ -1079,12 +1080,12 @@ class SimpleRLNetwork(NetworkModel):
 
     def _create_values(self, prev_out: tf.Tensor):
         """
-        Creates the output layer for reporting predicted temperature of all four behaviors
+        Creates the output layer for our policy
         :param prev_out: The output of the previous layer
-        :return: output, log_output
+        :return: output probabilities, log_output probabilities
         """
-        w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 2], self.w_decay)
-        b = create_bias_var(self.cvn("BIAS", 'o', 0), [2], self.bias_init)
+        w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 4], self.w_decay)
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [4], self.bias_init)
         out = tf.nn.softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', 0))
         log_out = tf.nn.log_softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', -1))
         return out, log_out
@@ -1157,7 +1158,7 @@ class SimpleRLNetwork(NetworkModel):
             self._x_in = tf.placeholder(tf.float32, [None, 1, GlobalDefs.frame_rate*GlobalDefs.hist_seconds, 1], "x_in")
             # reward values: NSAMPLES x 1 (Note: Only picked behavior will get rewarded!)
             self._reward = tf.placeholder(tf.float32, [None, 1], name="reward")
-            # sample index and index of the picked behavior: NSAMPLES x 2 (either 0 or 1, i.e. straight or turn)
+            # sample index and index of the picked behavior: NSAMPLES x 2 (either 0, 1, 2 or 3, i.e. stay, s, l or r)
             self._pick = tf.placeholder(tf.int32, [None, 2], name="pick")
             # data binning layer
             xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
@@ -1165,6 +1166,7 @@ class SimpleRLNetwork(NetworkModel):
             conv = self._create_convolution_layer('t', xin_pool)
             deep_out = self._create_branch('t', conv)
             self._value_out, self._log_value_out = self._create_values(deep_out)
+            self._action = tf.multinomial(self._log_value_out, 1, name="action")
             self._responsible_out = tf.gather_nd(self._log_value_out, self._pick, "responsible_out")
             self._loss = -tf.reduce_sum(self._responsible_out * self._reward)
             tf.add_to_collection("losses", self._loss)
@@ -1200,6 +1202,7 @@ class SimpleRLNetwork(NetworkModel):
             graph = self._session.graph
             self._value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
             self._log_value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', -1) + ":0")
+            self._action = graph.get_tensor_by_name("action:0")
             self._responsible_out = graph.get_tensor_by_name("responsible_out:0")
             self._x_in = graph.get_tensor_by_name("x_in:0")
             self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
@@ -1266,7 +1269,7 @@ class SimpleRLNetwork(NetworkModel):
         :param x_in: The temperature history as network input
         :param keep: The keep probability of each unit
         :param det_drop: The deterministic keep/drop of each unit
-        :return: 2-element vector of values for straight and turn
+        :return: 4-element vector of values for stay, straight, left and right
         """
         self._check_init()
         with self._graph.as_default():
@@ -1281,20 +1284,15 @@ class SimpleRLNetwork(NetworkModel):
         :param p_explore: Probability of choosing random action instead of following policy
         :param keep: The keep probability of each unit
         :param det_drop: The deterministic keep/drop of each unit
-        :return: The index of the chosen action (straight=0, turn=1)
+        :return:
+            [0]: The index of the chosen action (stay=0, straight=1, left=2, right=3)
+            [1]: True if the action was exploratory
         """
         if self._uni_cash.next_rand() < p_explore:
-            return np.random.randint(2)
-        v = self.get_values(x_in, keep, det_drop).ravel()
-        if np.any(np.isnan(v)):
-            raise ValueError("Invalid probabilities returned")
-        # we only have two actions - so these probabilities are in fact redundant at the moment
-        # hence only compare to first
-        dec = self._uni_cash.next_rand()
-        if dec < v[0]:
-            return 0
-        else:
-            return 1
+            return np.random.randint(4), True
+        with self._graph.as_default():
+            a = self._action.eval(self._create_feed_dict(x_in, keep=keep, removal=det_drop), session=self._session)
+        return np.asscalar(a), False
 
     def final_hidden_output(self, xbatch, det_drop=None) -> np.ndarray:
         """
