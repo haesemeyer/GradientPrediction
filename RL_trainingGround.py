@@ -56,26 +56,6 @@ class RLTrainer(TemperatureArena):
         """
         return (temp_trace - self.t_mean)/self.t_std
 
-    def _discount_reward(self, q: deque):
-        """
-        Takes a queue with inputs, rewards and chosen actions and returns the discounted rewards as well as
-        input and chosen values for the action to be trained
-        :param q: Queue with elements of tuples (x_in, chosen, reward, was_explore)
-        :return:
-            [0]: x_in of the action to train
-            [1]: chosen action
-            [2]: discounted value of the action
-            [3]: if action was exploratory
-        """
-        if len(q) != self.discount_steps:
-            raise ValueError("Inconsistent queue length. Length = {0}, n_steps = {1}".format(len(q),
-                                                                                             self.discount_steps))
-        value = 0
-        for i, item in enumerate(q):
-            value += item[2] * (self.discount_alpha**i)
-        to_train = q.popleft()
-        return to_train[0], to_train[1], value, to_train[3]
-
     def get_bout_probability(self, x_in):
         """
         Returns the bout probability
@@ -118,6 +98,7 @@ class RLTrainer(TemperatureArena):
             [1] For each performed  behavior the reward received
             [2] The selected behaviors (0-3)
         """
+        train_memory = []
         history = GlobalDefs.frame_rate * GlobalDefs.hist_seconds
         burn_period = history * 2
         start = history + 1
@@ -133,7 +114,6 @@ class RLTrainer(TemperatureArena):
         # overall bout frequency at ~1 Hz
         last_p_move_evaluation = -100  # tracks the frame when we last updated our movement evaluation
         p_eval = self.p_move
-        discount_queue = deque(maxlen=self.discount_steps)
         # variables to prevent odd-ball behavior during training
         last_move_select = 0  # step in which network last moved (i.e. evaluation happened *and* selection was not "N")
         while step < nsteps + burn_period:
@@ -168,21 +148,9 @@ class RLTrainer(TemperatureArena):
                 d_end = np.abs(self.temperature(traj[-1, 0], traj[-1, 1]) - pref)
                 reward_move = d_start - d_end
                 this_reward = reward_move
-            # train network
+            # add data to training batch memory
             if train:
-                discount_queue.append((model_in.copy(), chosen, this_reward, this_was_explore))
-                if len(discount_queue) == self.discount_steps:
-                    mi, ch, val, we = self._discount_reward(discount_queue)
-                    self.avg_reward = self.avg_reward + (1 / self.rev_step) * (val - self.avg_reward)
-                    self.rev_step += 1
-                    val -= self.avg_reward
-                    all_rewards.append(val)
-                    # transform value and chosen into np.array
-                    val = np.array([val])
-                    ch = np.array([ch])
-                    # do not train on exploratory moves
-                    if not we:
-                        self.model.train(mi, val, ch, 0.5)
+                train_memory.append((model_in.copy(), this_reward, chosen, this_was_explore))
             # implement trajectory
             if bt == "N":
                 pos[step, :] = pos[step-1, :]
@@ -193,6 +161,22 @@ class RLTrainer(TemperatureArena):
                 else:
                     pos[step:, :] = traj[:pos[step:, :].shape[0], :]
                 step += self.blen
+        # train the model if requested - NOTE: This is currently inefficient as it doesn't aggregate into batches!
+        if train:
+            # calculate discounted values
+            g = 0
+            for sample_ix in reversed(range(len(train_memory))):
+                mi, rew, ch, we = train_memory[sample_ix]
+                g = self.discount_alpha*g + rew
+                train_memory[sample_ix] = (mi, g, ch, we)
+                self.avg_reward = self.avg_reward + (1 / self.rev_step) * (g - self.avg_reward)
+                self.rev_step += 1
+            ix = np.arange(len(train_memory))
+            np.random.shuffle(ix)
+            for sample_ix in ix:
+                mi, val, ch, we = train_memory[sample_ix]
+                if not we:  # don't train on exploratory moves
+                    self.model.train(mi, np.array([val-self.avg_reward]), np.array([ch]), 0.5)
         return pos[burn_period:, :], all_rewards, all_behavs
 
 
@@ -246,13 +230,13 @@ class CircleRLTrainer(RLTrainer):
 
 N_STEPS = 100000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
 STEP_INC = 500  # the total number of steps to run is N_STEPS + episode*STEP_INC
-N_EPOCHS = 1500  # the number of total training epochs to run
+N_EPOCHS = 1000  # the number of total training epochs to run
 N_CONV = 20  # the number of convolution filters in the network
 N_LAYERS = 3  # the numer of hidden layers in the upper network branches
 N_UNITS = 128  # the number of units in each network hidden layer
 T_PREFERRED = 26  # the preferred temperature after training
 SAVE_EVERY = 500  # save network state every this many episodes
-NUM_NETS = 20  # the total number of networks to train
+NUM_NETS = 1  # the total number of networks to train
 
 if __name__ == "__main__":
     # instantiate example trainer objects to allow for a fixed temperature mean and standard across
