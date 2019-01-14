@@ -1202,7 +1202,7 @@ class SimpleRLNetwork(NetworkModel):
             graph = self._session.graph
             self._value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
             self._log_value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', -1) + ":0")
-            self._action = graph.get_tensor_by_name("action:0")
+            self._action = tf.multinomial(self._log_value_out, 1, name="action")
             self._responsible_out = graph.get_tensor_by_name("responsible_out:0")
             self._x_in = graph.get_tensor_by_name("x_in:0")
             self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
