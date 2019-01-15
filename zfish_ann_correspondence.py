@@ -89,6 +89,8 @@ def greedy_max_clust(corr_mat, threshold, col_names):
     # recode column matches into row matches
     row_matches = np.full(corr_mat.shape[0], -1)
     for ix, cm in enumerate(col_matches):
+        if cm < 0:
+            continue
         row_matches[cm] = ix
     return {ix: col_names[row_matches[ix]] if row_matches[ix] != -1 else ix for ix in range(corr_mat.shape[0])}
 
