@@ -177,6 +177,7 @@ class RLTrainer(TemperatureArena):
                 mi, val, ch, we = train_memory[sample_ix]
                 if not we:  # don't train on exploratory moves
                     self.model.train(mi, np.array([val-self.avg_reward]), np.array([ch]), 0.5)
+                    all_rewards.append(val-self.avg_reward)  # note that this is not aligned with actual behaviors!
         return pos[burn_period:, :], all_rewards, all_behavs
 
 
@@ -230,13 +231,13 @@ class CircleRLTrainer(RLTrainer):
 
 N_STEPS = 100000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
 STEP_INC = 500  # the total number of steps to run is N_STEPS + episode*STEP_INC
-N_EPOCHS = 1000  # the number of total training epochs to run
+N_EPOCHS = 1500  # the number of total training epochs to run
 N_CONV = 20  # the number of convolution filters in the network
 N_LAYERS = 3  # the numer of hidden layers in the upper network branches
 N_UNITS = 128  # the number of units in each network hidden layer
 T_PREFERRED = 26  # the preferred temperature after training
 SAVE_EVERY = 500  # save network state every this many episodes
-NUM_NETS = 1  # the total number of networks to train
+NUM_NETS = 20  # the total number of networks to train
 
 if __name__ == "__main__":
     # instantiate example trainer objects to allow for a fixed temperature mean and standard across
