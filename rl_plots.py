@@ -23,14 +23,74 @@ from RL_trainingGround import CircleRLTrainer
 from mo_types import MoTypes
 from scipy.ndimage import gaussian_filter1d
 from pandas import DataFrame
+from Figure1 import get_bout_da, get_bout_starts
+from scipy.stats import wilcoxon
+import pickle
+from zfish_ann_correspondence import RegionResults, create_corr_mat, greedy_max_clust
 
 
 # file definitions
 base_path_rl = "./model_data/SimpleRL_Net/"
-paths_rl = [f + '/' for f in os.listdir(base_path_rl) if "mx_" in f]
+paths_rl = [f + '/' for f in os.listdir(base_path_rl) if "mx_disc_" in f]
 
 base_path_zf = "./model_data/Adam_1e-4/sepInput_mixTrain/"
 paths_512_zf = [f + '/' for f in os.listdir(base_path_zf) if "_3m512_" in f]
+
+
+def run_flat_gradient(model_path):
+    mdata = c.ModelData(model_path)
+    gpn = c.SimpleRLNetwork()
+    gpn.load(mdata.ModelDefinition, mdata.LastCheckpoint)
+    arena = CircleRLTrainer(rl_net, sim_radius, 22, 22, 26)
+    arena.t_std = t_std
+    arena.t_mean = t_mean
+    arena.p_explore = 0.5
+    return circ_train.run_sim(GlobalDefs.n_steps, False)[0]
+
+
+def compute_da_modulation(model_path, pos_trained):
+    pos_flt = run_flat_gradient(model_path)
+    bs_ev = get_bout_starts(pos_trained)
+    bs_flt = get_bout_starts(pos_flt)
+    # get delta angle of each bout
+    da_ev = get_bout_da(pos_trained, bs_ev)
+    da_flt = get_bout_da(pos_flt, bs_flt)
+    # get temperature at each bout start
+    temp_ev = a.temp_convert(np.sqrt(np.sum(pos_trained[bs_ev.astype(bool), :2]**2, 1)), 'r')
+    temp_flt = a.temp_convert(np.sqrt(np.sum(pos_flt[bs_flt.astype(bool), :2] ** 2, 1)), 'r')
+    # get delta-temperature effected by each bout
+    dt_ev = np.r_[0, np.diff(temp_ev)]
+    dt_flt = np.r_[0, np.diff(temp_flt)]
+    # only consider data above T_Preferred and away from the edge
+    valid_ev = np.logical_and(temp_ev > GlobalDefs.tPreferred, temp_ev < GlobalDefs.circle_sim_params["t_max"]-1)
+    valid_flt = np.logical_and(temp_flt > GlobalDefs.tPreferred, temp_flt < GlobalDefs.circle_sim_params["t_max"] - 1)
+    da_ev = da_ev[valid_ev]
+    da_flt = da_flt[valid_flt]
+    dt_ev = dt_ev[valid_ev]
+    dt_flt = dt_flt[valid_flt]
+    # get turn magnitude for up and down gradient
+    up_grad_ev = np.mean(np.abs(da_ev[dt_ev > 0.5]))
+    dn_grad_ev = np.mean(np.abs(da_ev[dt_ev < -0.5]))
+    up_grad_flt = np.mean(np.abs(da_flt[dt_flt > 0.5]))
+    dn_grad_flt = np.mean(np.abs(da_flt[dt_flt < -0.5]))
+    up_change = up_grad_ev / up_grad_flt
+    dn_change = dn_grad_ev / dn_grad_flt
+    return dn_change, up_change
+
+
+def compute_gradient_bout_frequency(positions):
+    def bout_freq(pos: np.ndarray):
+        r = np.sqrt(np.sum(pos[:, :2]**2, 1))  # radial position
+        bs = get_bout_starts(pos)  # bout starts
+        bins = np.linspace(0, GlobalDefs.circle_sim_params["radius"], 6)
+        bcenters = bins[:-1] + np.diff(bins)/2
+        cnt_r = np.histogram(r, bins)[0]
+        cnt_r_bs = np.histogram(r[bs > 0.1], bins)[0]
+        bfreq = cnt_r_bs / cnt_r * GlobalDefs.frame_rate
+        return bfreq, bcenters
+
+    bf, bc = bout_freq(positions)
+    return bc, bf
 
 
 if __name__ == "__main__":
@@ -54,7 +114,10 @@ if __name__ == "__main__":
     rewards_given = []
     grad_errors = []
     for p in paths_rl:
-        l_file = h5py.File(mpath(base_path_rl, p) + "/losses.hdf5", 'r')
+        try:
+            l_file = h5py.File(mpath(base_path_rl, p) + "/losses.hdf5", 'r')
+        except IOError:
+            continue
         rewards_given.append(np.array(l_file["rewards_given"]))
         grad_errors.append(np.array(l_file["ep_avg_grad_error"]))
         l_file.close()
@@ -73,6 +136,13 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "rl_training_errors.pdf", type="pdf")
 
+    # store bout frequency modulation in gradients
+    bout_freqs = np.empty((len(paths_rl), 5))
+    bout_bin_centers = None
+    # store turn angle modulation during navigation
+    turn_mod_data_dict = {"Type": [], "Direction": [], "Turn Enhancement": []}
+    net_down = []
+    net_up = []
     # Panel - gradient navigation performance - rl net and predictive network
     sim_radius = 100
     sim_min = 22
@@ -89,14 +159,27 @@ if __name__ == "__main__":
             circ_train = CircleRLTrainer(rl_net, sim_radius, sim_min, sim_max, 26)
             circ_train.t_std = t_std
             circ_train.t_mean = t_mean
-            naive_pos, _ = circ_train.run_sim(GlobalDefs.n_steps, False)
+            circ_train.p_explore = 0.5  # try to match to exploration in predictive network (best taken 50% of time)
+            naive_pos = circ_train.run_sim(GlobalDefs.n_steps, False)[0]
             rl_net.load(mdata.ModelDefinition, mdata.LastCheckpoint)
             circ_train = CircleRLTrainer(rl_net, sim_radius, sim_min, sim_max, 26)
             circ_train.t_std = t_std
             circ_train.t_mean = t_mean
-            trained_pos, _ = circ_train.run_sim(GlobalDefs.n_steps, False)
+            circ_train.p_explore = 0.5  # try to match to exploration in predictive network (best taken 50% of time)
+            trained_pos = circ_train.run_sim(GlobalDefs.n_steps, False)[0]
+            # process bout frequency
+            bout_bin_centers, bfreqs = compute_gradient_bout_frequency(trained_pos)
+            bout_freqs[i, :] = bfreqs
+            # process turn modulation
+            dn, up = compute_da_modulation(mpath(base_path_rl, p), trained_pos)
+            net_down.append(dn)
+            net_up.append(up)
+            turn_mod_data_dict["Type"] += ["RL Network", "RL Network"]
+            turn_mod_data_dict["Direction"] += ["down", "up"]
+            turn_mod_data_dict["Turn Enhancement"] += [dn, up]
         naive_rl[i, :] = a.bin_simulation(naive_pos, bns, 'r')
         trained_rl[i, :] = a.bin_simulation(trained_pos, bns, 'r')
+    bout_bin_centers = bout_bin_centers / sim_radius * (sim_max - sim_min) + sim_min
     std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
     ana = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", None)
     trained_zf = np.zeros_like(naive_rl)
@@ -113,8 +196,26 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "rl_gradient_distribution.pdf", type="pdf")
 
-    # Clustering of temperature responses
+    # plot bout frequency modulation in the gradient
+    fig, ax = pl.subplots()
+    sns.tsplot(bout_freqs, bout_bin_centers, n_boot=1000, color="C1", err_style="ci_band")
+    ax.set_xlim(23, 36)
+    ax.set_xticks([25, 30, 35])
+    ax.set_yticks([0.5, 0.75, 1, 1.25])
+    ax.set_xlabel("Temperature [C]")
+    ax.set_ylabel("Swim frequency [Hz]")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "rl_net_gradient_swim_frequency.pdf", type="pdf")
+    # plot turn modulation
+    data_frame = DataFrame(turn_mod_data_dict)
+    fig, ax = pl.subplots()
+    sns.barplot("Type", "Turn Enhancement", "Direction", data_frame, ["RL Network"], ["down", "up"], ci=68)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5])
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "rl_net_grad_turn_modulation.pdf", type="pdf")
+    print("Network comparison. Wilcoxon statistic {0}; p-value {1}".format(*wilcoxon(net_down, net_up)))
 
+    # Clustering of temperature responses
     # load and interpolate temperature stimulus
     dfile = h5py.File("stimFile.hdf5", 'r')
     tsin = np.array(dfile['sine_L_H_temp'])
@@ -124,7 +225,6 @@ if __name__ == "__main__":
     dfile.close()
 
     all_cells_rl = []
-    p_turn = []
     all_ids_rl = []
     for i, p in enumerate(paths_rl):
         mdata = c.ModelData(mpath(base_path_rl, p))
@@ -135,7 +235,6 @@ if __name__ == "__main__":
             temp = np.r_[lead_in, temperature]
             activity_out = rl_net.unit_stimulus_responses(temp, t_mean, t_std)
             cell_res = np.hstack(activity_out['t'])
-            pt = activity_out['o'][0][:, 1]
             id_mat = np.zeros((3, cell_res.shape[1]), dtype=np.int32)
             id_mat[0, :] = i
             hidden_sizes = [128] * 3  # currently hard coded, could be extracted from rl_net object
@@ -146,10 +245,8 @@ if __name__ == "__main__":
                 start += hs
         all_cells_rl.append(cell_res)
         all_ids_rl.append(id_mat)
-        p_turn.append(pt[:, None])
     all_cells_rl = np.hstack(all_cells_rl)
     all_ids_rl = np.hstack(all_ids_rl)
-    p_turn = np.hstack(p_turn)
 
     # convolve activity with nuclear gcamp calcium kernel
     raw_activity = all_cells_rl.copy()
@@ -193,7 +290,6 @@ if __name__ == "__main__":
     time = np.arange(cluster_acts_rl.shape[0]) / GlobalDefs.frame_rate
     for i in range(n_regs_rl):
         act = cluster_acts_rl[:, i].copy()
-        act /= np.mean(act[:500])  # normalize to baseline activity which fluctuates a lot in these networks
         if not is_on[i]:
             ax_off = axes_off[ax_ix[i]]
             ax_off.plot(time, act, color=plot_cols_rl[i])
@@ -224,34 +320,33 @@ if __name__ == "__main__":
     sns.despine(fig)
     fig.savefig(save_folder + "rl_all_cluster_counts.pdf", type="pdf")
 
-    # compare matching of RL and predictive zebrafish types
-    ana_zf = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", "activity_store.hdf5")
-    all_ids_zf = []
-    all_cells_zf = []
-    for i, p in enumerate(paths_512_zf):
-        cell_res, ids = ana_zf.temperature_activity(mpath(base_path_zf, p), temperature, i)
-        all_ids_zf.append(ids)
-        all_cells_zf.append(cell_res)
-    all_ids_zf = np.hstack(all_ids_zf)
-    all_cells_zf = np.hstack(all_cells_zf)
-    # convolve with our kernel
-    for i in range(all_cells_zf.shape[1]):
-        all_cells_zf[:, i] = convolve(all_cells_zf[:, i], kernel, mode='full')[:all_cells_zf.shape[0]]
-    clust_ids_zf = a.cluster_activity(8, all_cells_zf, "cluster_info.hdf5")[0]
-    cluster_acts_zf = np.zeros((all_cells_rl.shape[0] // 3, n_regs_rl))
-    for i in range(n_regs_rl):
-        act = np.mean(a.trial_average(all_cells_zf[:, clust_ids_zf == i], 3), 1)
-        cluster_acts_zf[:, i] = act
+    # compare matching of RL and zebrafish types
+    # load zebrafish region results and create Rh56 regressor matrix for FastON, SlowON, FastOFF, SlowOFF
+    result_labels = ["Rh6"]
+    region_results = {}  # type: Dict[str, RegionResults]
+    analysis_file = h5py.File('H:/ClusterLocations_170327_clustByMaxCorr/regiondata.hdf5', 'r')
+    for rl in result_labels:
+        region_results[rl] = pickle.loads(np.array(analysis_file[rl]))
+    analysis_file.close()
+    rh_56_calcium = region_results["Rh6"].regressors[:, :-1]
+    # the names of these regressors according to Haesemeyer et al., 2018
+    reg_names = ["Fast ON", "Slow ON", "Fast OFF", "Slow OFF"]
+    ca_time = np.linspace(0, 165, rh_56_calcium.shape[0])
+    net_time = np.linspace(0, 165, cluster_acts_rl.shape[0])
+    zf_cluster_centroids = np.zeros((net_time.size, rh_56_calcium.shape[1]))
+    for i in range(rh_56_calcium.shape[1]):
+        zf_cluster_centroids[:, i] = np.interp(net_time, ca_time, rh_56_calcium[:, i])
 
-    corr_mat = np.zeros((cluster_acts_zf.shape[1], cluster_acts_rl.shape[1]))
-    for i in range(cluster_acts_zf.shape[1]):
-        for j in range(cluster_acts_rl.shape[1]):
-            corr_mat[i, j] = np.corrcoef(cluster_acts_zf[:, i], cluster_acts_rl[:, j])[0, 1]
+    # perform all pairwise correlations between the network and zebrafish units during sine stimulus phase
+    cm_sine = create_corr_mat(cluster_acts_rl, zf_cluster_centroids, net_time, 60, 105)
+    assignment = greedy_max_clust(cm_sine, 0.6, reg_names)
+    assign_labels = [assignment[k] for k in range(cm_sine.shape[0])]
 
+    # plot correlation matrix
     fig, ax = pl.subplots()
-    names = ['0', 'Fast OFF', 'Int OFF', 'Slow OFF', 'Fast ON', 'Slow ON', '6', '7']
-    sns.heatmap(np.round(corr_mat, 2), vmin=-1, vmax=1, center=0, cmap="RdBu_r", annot=True, yticklabels=names)
-    ax.set_xlabel("RL Network")
-    ax.set_ylabel("Predictive Network")
+    sns.heatmap(cm_sine, vmin=-1, vmax=1, center=0, annot=True, xticklabels=reg_names, yticklabels=assign_labels, ax=ax,
+                cmap="RdBu_r")
+    ax.set_xlabel("Zebrafish cell types")
+    ax.set_ylabel("ANN clusters")
     fig.tight_layout()
-    fig.savefig(save_folder + "rl_cluster_fish_correlations.pdf", type="pdf")
+    fig.savefig(save_folder + "ZFish_rlNet_Correspondence.pdf", type="pdf")
