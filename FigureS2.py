@@ -299,7 +299,6 @@ if __name__ == "__main__":
     ax.set_xlabel("Time around bout [s]")
     sns.despine(fig, ax)
     fig.savefig(save_folder + "behav_triggered_SlowOFF.pdf", type="pdf")
-    fig.savefig(save_folder + "behav_triggered_FastOFF.pdf", type="pdf")
     fig, ax = pl.subplots()
     sns.tsplot(all_units_turn[:, clust_ids_zf == int_off].T, kernel_time, n_boot=1000, color="C0", ax=ax)
     sns.tsplot(all_units_straight[:, clust_ids_zf == int_off].T, kernel_time, n_boot=1000, color="C1", ax=ax)
