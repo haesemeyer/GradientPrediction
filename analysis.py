@@ -347,3 +347,20 @@ def cluster_activity(n_regs, all_cells, cluster_file=None, avg_trials=True, mem_
             clfile.create_dataset("coords", data=coords)
             clfile.close()
     return clust_ids, coords
+
+
+def turn_coherence(behaviors, n_steps):
+    """
+    Computes the probability of keeping a turn direction, ignoring intervening stay and straight bouts
+    :param behaviors: Array of consecutive behaviors - 0-stay, 1-straight, 2-left, 3-right
+    :param n_steps: The number of steps over which to compute probalities
+    :return: n_steps long array of probabilities of keeping the same turn direction
+    """
+    behaviors = behaviors[behaviors > 1].copy()
+    instances = []
+    for i, b in enumerate(behaviors):
+        if i >= behaviors.size-n_steps:
+            break
+        following = behaviors[i+1:i+n_steps+1]
+        instances.append(following == b)
+    return np.mean(instances, 0)
