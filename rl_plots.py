@@ -27,6 +27,7 @@ from Figure1 import get_bout_da, get_bout_starts
 from scipy.stats import wilcoxon
 import pickle
 from zfish_ann_correspondence import RegionResults, create_corr_mat, greedy_max_clust
+from data_stores import SimulationStore
 
 
 # file definitions
@@ -93,6 +94,19 @@ def compute_gradient_bout_frequency(positions):
     return bc, bf
 
 
+def compute_da_coherence(model_path, drop_list=None):
+    with SimulationStore("sim_store.hdf5", std_zf, MoTypes(False)) as sim_store:
+        pos_ev = sim_store.get_sim_pos(model_path, "r", "bfevolve", drop_list)
+    bs_ev = get_bout_starts(pos_ev)
+    # get delta angle of each bout
+    da_ev = np.rad2deg(get_bout_da(pos_ev, bs_ev))
+    # convert into appproximation of S, L and R behaviors
+    bhv_ev = np.ones_like(da_ev)
+    bhv_ev[da_ev < -10] = 2
+    bhv_ev[da_ev > 10] = 3
+    return a.turn_coherence(bhv_ev, 10), da_ev
+
+
 if __name__ == "__main__":
     save_folder = "./DataFigures/FigureRL/"
     if not os.path.exists(save_folder):
@@ -143,6 +157,10 @@ if __name__ == "__main__":
     turn_mod_data_dict = {"Type": [], "Direction": [], "Turn Enhancement": []}
     net_down = []
     net_up = []
+    # store turn persistence
+    rl_turn_coherence = []
+    # store turn angles
+    rl_da = []
     # Panel - gradient navigation performance - rl net and predictive network
     sim_radius = 100
     sim_min = 22
@@ -166,7 +184,9 @@ if __name__ == "__main__":
             circ_train.t_std = t_std
             circ_train.t_mean = t_mean
             circ_train.p_explore = 0.5  # try to match to exploration in predictive network (best taken 50% of time)
-            trained_pos = circ_train.run_sim(GlobalDefs.n_steps, False)[0]
+            trained_pos, _, trained_behav = circ_train.run_sim(GlobalDefs.n_steps, False)
+            rl_turn_coherence.append(a.turn_coherence(np.array(trained_behav), 10))
+            rl_da.append(np.rad2deg(get_bout_da(trained_pos, get_bout_starts(trained_pos))))
             # process bout frequency
             bout_bin_centers, bfreqs = compute_gradient_bout_frequency(trained_pos)
             bout_freqs[i, :] = bfreqs
@@ -179,6 +199,7 @@ if __name__ == "__main__":
             turn_mod_data_dict["Turn Enhancement"] += [dn, up]
         naive_rl[i, :] = a.bin_simulation(naive_pos, bns, 'r')
         trained_rl[i, :] = a.bin_simulation(trained_pos, bns, 'r')
+
     bout_bin_centers = bout_bin_centers / sim_radius * (sim_max - sim_min) + sim_min
     std_zf = c.GradientData.load_standards("gd_training_data.hdf5")
     ana = a.Analyzer(MoTypes(False), std_zf, "sim_store.hdf5", None)
@@ -214,6 +235,69 @@ if __name__ == "__main__":
     sns.despine(fig, ax)
     fig.savefig(save_folder + "rl_net_grad_turn_modulation.pdf", type="pdf")
     print("Network comparison. Wilcoxon statistic {0}; p-value {1}".format(*wilcoxon(net_down, net_up)))
+    # plot turn coherence
+    all_bout_da = np.load("all_bout_da.npy")  # zebrafish gradient data
+    all_bout_phases = np.load("all_bout_phases.npy")
+    pd_turn_coherence = []
+    pd_da = []
+    for i, p in enumerate(paths_512_zf):
+        tc, da = compute_da_coherence(mpath(base_path_zf, p))
+        pd_turn_coherence.append(tc)
+        pd_da.append(da)
+    zf_turn_coherence, zf_da = [], []
+    for ar, bp in zip(all_bout_da, all_bout_phases):
+        ar = ar[bp == 8]  # limit to gradient phase
+        bhv = np.ones_like(ar)
+        bhv[ar < -10] = 2
+        bhv[ar > 10] = 3
+        zf_turn_coherence.append(a.turn_coherence(bhv, 10))
+        zf_da.append(ar)
+    fig, ax = pl.subplots()
+    sns.tsplot(zf_turn_coherence, np.arange(10)+1, color="C0")
+    sns.tsplot(rl_turn_coherence, np.arange(10)+1, color="C1")
+    sns.tsplot(pd_turn_coherence, np.arange(10)+1, color=[0.5, 0.5, 0.5])
+    ax.plot([1, 10], [0.5, 0.5], 'k--')
+    ax.set_xlabel("Subsequent turns")
+    ax.set_ylabel("p(Same direction)")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "rl_net_gradient_turn_coherence.pdf", type="pdf")
+    # plot bout angle distribution based on median angle for fish, predictive and rl network
+    fig, ax = pl.subplots()
+    for da in zf_da:
+        if np.median(da) < 0:
+            sns.kdeplot(da, color="C0", alpha=0.5, lw=0.5, ax=ax)
+        else:
+            sns.kdeplot(da, color="C3", alpha=0.5, lw=0.5, ax=ax)
+    ax.set_xlim(-180, 180)
+    ax.set_xticks([-180, -135, -90, -45, 0, 45, 90, 135, 180])
+    ax.set_xlabel("Turn angle [deg]")
+    ax.set_ylabel("Density")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "zebrafish_turn_angles.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    for da in pd_da:
+        if np.median(da) < 0:
+            sns.kdeplot(da, color="C0", alpha=0.5, lw=0.5, ax=ax)
+        else:
+            sns.kdeplot(da, color="C3", alpha=0.5, lw=0.5, ax=ax)
+    ax.set_xlim(-180, 180)
+    ax.set_xticks([-180, -135, -90, -45, 0, 45, 90, 135, 180])
+    ax.set_xlabel("Turn angle [deg]")
+    ax.set_ylabel("Density")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "pred_net_turn_angles.pdf", type="pdf")
+    fig, ax = pl.subplots()
+    for da in rl_da:
+        if np.median(da) < 0:
+            sns.kdeplot(da, color="C0", alpha=0.5, lw=0.5, ax=ax)
+        else:
+            sns.kdeplot(da, color="C3", alpha=0.5, lw=0.5, ax=ax)
+    ax.set_xlim(-180, 180)
+    ax.set_xticks([-180, -135, -90, -45, 0, 45, 90, 135, 180])
+    ax.set_xlabel("Turn angle [deg]")
+    ax.set_ylabel("Density")
+    sns.despine(fig, ax)
+    fig.savefig(save_folder + "rl_net_turn_angles.pdf", type="pdf")
 
     # Clustering of temperature responses
     # load and interpolate temperature stimulus
