@@ -6,8 +6,7 @@
 Script to train gradient reinforcement learning navigation model
 """
 
-from collections import deque
-from core import SimpleRLNetwork
+from core import ReinforcementLearningNetwork
 from zf_simulators import TemperatureArena
 import numpy as np
 import matplotlib.pyplot as pl
@@ -22,7 +21,7 @@ class RLTrainer(TemperatureArena):
     """
     Class for implementing training of a reinforcement learning model
     """
-    def __init__(self, model: SimpleRLNetwork, t_preferred: float, t_mean: float, t_std: float):
+    def __init__(self, model: ReinforcementLearningNetwork, t_preferred: float, t_mean: float, t_std: float):
         """
         Creates a new RLTrainer object
         :param model: The network model to be trained / to drive simulations
@@ -110,7 +109,7 @@ class RLTrainer(TemperatureArena):
         all_behavs = []
         # run simulation
         step = start
-        model_in = np.zeros((1, 1, history, 1))
+        model_in = np.zeros((1, 3, history, 1))
         # overall bout frequency at ~1 Hz
         last_p_move_evaluation = -100  # tracks the frame when we last updated our movement evaluation
         p_eval = self.p_move
@@ -129,6 +128,10 @@ class RLTrainer(TemperatureArena):
                 continue
             model_in[0, 0, :, 0] = self._standardize(self.temperature(pos[step - history:step, 0],
                                                                       pos[step - history:step, 1]))
+            spd = np.sqrt(np.sum(np.diff(pos[step - history - 1:step, 0:2], axis=0) ** 2, 1))
+            model_in[0, 1, :, 0] = (spd - 0.01754121) / 0.04892178
+            dang = np.diff(pos[step - history - 1:step, 2], axis=0)
+            model_in[0, 2, :, 0] = dang / 0.05052296
             chosen, this_was_explore = self.model.choose_action(model_in, self.p_explore, keep=0.1 if train else 1.0,
                                                                 det_drop=self.remove)
             bt = self.select_behavior(chosen)
@@ -185,7 +188,7 @@ class CircleRLTrainer(RLTrainer):
     """
     Implements a RL-Model based circular gradient navigation simulation and trainer
     """
-    def __init__(self, model: SimpleRLNetwork, radius, t_min, t_max, t_preferred=None):
+    def __init__(self, model: ReinforcementLearningNetwork, radius, t_min, t_max, t_preferred=None):
         """
         Creates a new ModelGradSimulation
         :param model: The network model to run the simulation
@@ -229,11 +232,12 @@ class CircleRLTrainer(RLTrainer):
         return self.radius
 
 
-N_STEPS = 100000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
-STEP_INC = 500  # the total number of steps to run is N_STEPS + episode*STEP_INC
+N_STEPS = 1000000  # the number of time steps to run in each arena (NOTE: Not equal to number of generated behaviors)
+STEP_INC = 1000  # the total number of steps to run is N_STEPS + episode*STEP_INC
 N_EPOCHS = 1500  # the number of total training epochs to run
 N_CONV = 20  # the number of convolution filters in the network
-N_LAYERS = 3  # the numer of hidden layers in the upper network branches
+N_LAYERS_MIXED = 3  # the numer of hidden layers in the upper network branches
+N_LAYERS_BRANCH = 2
 N_UNITS = 128  # the number of units in each network hidden layer
 T_PREFERRED = 26  # the preferred temperature after training
 SAVE_EVERY = 500  # save network state every this many episodes
@@ -251,7 +255,7 @@ if __name__ == "__main__":
     temp_mean = (tm1 + tm2) / 2
     temp_std = (s1 + s2) / 2
     for net_num in range(NUM_NETS):
-        train_folder = "./model_data/SimpleRL_Net/mx_disc_{0}".format(net_num)
+        train_folder = "./model_data/FullRL_Net/mx_disc_{0}".format(net_num)
         try:
             os.makedirs(train_folder, exist_ok=False)
         except OSError:
@@ -264,8 +268,8 @@ if __name__ == "__main__":
         global_count = 0
         avg_reward = 0
         rev_step = 1
-        with SimpleRLNetwork() as rl_net:
-            rl_net.setup(N_CONV, N_UNITS, N_LAYERS)
+        with ReinforcementLearningNetwork() as rl_net:
+            rl_net.setup(N_CONV, N_UNITS, N_LAYERS_BRANCH, N_LAYERS_MIXED)
             # save naive model including full graph
             save_path = rl_net.save_state(chk_file, 0)
             print("Model saved in file: %s" % save_path)
