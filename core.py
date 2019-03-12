@@ -1353,6 +1353,385 @@ class SimpleRLNetwork(NetworkModel):
         return w, b
 
 
+class ReinforcementLearningNetwork(NetworkModel):
+    """
+    Reinforcement learning network with only temperature and behavioral history as input
+    """
+    def __init__(self, use_dale_constraint=False, use_tanh=False):
+        """
+        Create a new simple reinforcment learning network model
+        """
+        super().__init__(use_dale_constraint, use_tanh)
+        # initialize fields that will be populated later
+        self.n_units = None
+        self.n_layers_branch = None
+        self.n_layers_mixed = None
+        self._n_mixed_dense = None
+        self._n_branch_dense = None
+        # model fields that are later needed for parameter feeding
+        self._keep_prob = None  # drop-out keep probability
+        self._reward = None  # reward delivered (for training)
+        self._pick = None  # the behaviors that was chosen and led to the reward above
+        self._responsible_out = None  # the output responsible for the current reward
+        # network output
+        self._value_out = None  # type: tf.Tensor
+        self._log_value_out = None  # type: tf.Tensor
+        self._action = None  # type: tf.Tensor
+        # the reward based loss (loss w.o. weight decay)
+        self._loss = None  # type: tf.Tensor
+        # total loss across the network
+        self._total_loss = None  # type: tf.Tensor
+        # the training step to train the network
+        self._train_step = None  # type: tf.Operation
+        # create cash of uniform random numbers
+        self._uni_cash = RandCash(1000, lambda s: np.random.rand(s))
+
+    # Protected API
+    def _create_unit_lists(self):
+        """
+        Creates lists of hidden unit counts and branch list according to network configuration
+        """
+        self._det_remove = {}
+        self._n_mixed_dense = [self.n_units[1]] * self.n_layers_mixed
+        if self.n_layers_branch == 0:
+            self._branches = ['m', 'o']  # mixed network
+        else:
+            self._branches = ['t', 's', 'a', 'm', 'o']  # single input network
+            self._n_branch_dense = [self.n_units[0]] * self.n_layers_branch
+
+    def _create_branch(self, branch: str, prev_out: tf.Tensor) -> tf.Tensor:
+        """
+        Creates a branch of the network
+        :param branch: The name of the branch
+        :param prev_out: The output of the previous layer
+        :return: The output of the branch
+        """
+        if branch not in self._branches:
+            raise ValueError("branch {0} is not valid. Has to be one of {1}".format(branch, self._branches))
+        n_layers = self.n_layers_mixed if branch == 'm' else self.n_layers_branch
+        last = prev_out
+        for i in range(n_layers):
+            last = self._create_hidden_layer(branch, i, last,
+                                             self._n_mixed_dense[i] if branch == 'm' else self._n_branch_dense[i])
+            last = tf.nn.dropout(last, self._keep_prob, name=self.cvn("DROP", branch, i))
+        return last
+
+    def _create_values(self, prev_out: tf.Tensor):
+        """
+        Creates the output layer for our policy
+        :param prev_out: The output of the previous layer
+        :return: output probabilities, log_output probabilities
+        """
+        w = create_weight_var(self.cvn("WEIGHT", 'o', 0), [prev_out.shape[1].value, 4], self.w_decay)
+        b = create_bias_var(self.cvn("BIAS", 'o', 0), [4], self.bias_init)
+        out = tf.nn.softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', 0))
+        log_out = tf.nn.log_softmax((tf.matmul(prev_out, w) + b), name=self.cvn("OUTPUT", 'o', -1))
+        return out, log_out
+
+    def _create_feed_dict(self, x_in, rewards=None, picks=None, keep=1.0, removal=None) -> dict:
+        """
+        Create network feed dict
+        :param x_in: The network input value
+        :param rewards: The delivered rewards
+        :param picks: The chosen units (optional but needs to be present if reward != None)
+        :param keep: The dropout probability for keeping all units
+        :param removal: Deterministic keep/removal vectors
+        :return: The feeding dict to pass to the network
+        """
+        f_dict = {self._x_in: x_in, self._keep_prob: keep}
+        if rewards is not None:
+            # augment rewards to 2D if necessary
+            if rewards.ndim == 1:
+                rewards = rewards[:, None]
+            f_dict[self._reward] = rewards
+            if picks is None or picks.size != rewards.size:
+                raise ValueError("If rewards are provided, picks need to be provided with the same number of samples!")
+            picks = np.c_[np.arange(picks.size)[:, None], picks[:, None]]
+            f_dict[self._pick] = picks
+        # Fill deterministic removal part of feed dict
+        for b in self._branches:
+            if b == 'o':
+                continue
+            for i, dr in enumerate(self._det_remove[b]):
+                s = dr.shape[0].value
+                if removal is None or b not in removal:
+                    f_dict[dr] = np.ones(s, dtype=np.float32)
+                else:
+                    if removal[b][i].size != s:
+                        raise ValueError("removal in branch {0} layer {1} does not have required size of {2}".format(b,
+                                                                                                                     i,
+                                                                                                                     s))
+                    f_dict[dr] = removal[b][i]
+        return f_dict
+
+    # Public API
+    def setup(self, n_conv_layers: int, n_units, n_layers_branch: int, n_layers_mixed: int):
+        """
+        Creates the network graph
+        :param n_conv_layers: The number of convolutional layers operating on the input
+        :param n_units: The number of units in each dense layer
+        :param n_layers_branch: The number of hidden layers in each branch (can be 0 for full mixing)
+        :param n_layers_mixed: The number of hidden layers in the mixed part of the network
+        """
+        self.clear()
+        # ingest parameters
+        if n_layers_mixed < 1:
+            raise ValueError("Network needs at least one mixed hidden layer")
+        if n_layers_branch < 0:
+            raise ValueError("Number of branch layers can't be negative")
+        self.n_conv_layers = n_conv_layers
+        if type(n_units) is not list:
+            self.n_units = [n_units] * 2
+        else:
+            if len(n_units) != 2:
+                raise ValueError("n_units should either be scalar or a 2-element list")
+            self.n_units = n_units
+        self.n_layers_branch = n_layers_branch
+        self.n_layers_mixed = n_layers_mixed
+        self._create_unit_lists()
+        self._graph = tf.Graph()
+        with self._graph.as_default():
+            # create deterministic removal units
+            for b in self._branches:
+                if b == 'm':
+                    self._det_remove[b] = [tf.placeholder(tf.float32, shape=[self._n_mixed_dense[i]],
+                                                          name=self.cvn("REMOVE", b, i))
+                                           for i in range(self.n_layers_mixed)]
+                else:
+                    self._det_remove[b] = [tf.placeholder(tf.float32, shape=[self._n_branch_dense[i]],
+                                                          name=self.cvn("REMOVE", b, i))
+                                           for i in range(self.n_layers_branch)]
+            # dropout probability placeholder
+            self._keep_prob = tf.placeholder(tf.float32, name="keep_prob")
+            # model input: NSAMPLES x (Temp,Move,Turn) x HISTORYSIZE x 1 CHANNEL
+            self._x_in = tf.placeholder(tf.float32, [None, 3, GlobalDefs.frame_rate*GlobalDefs.hist_seconds, 1], "x_in")
+            # reward values: NSAMPLES x 1 (Note: Only picked behavior will get rewarded!)
+            self._reward = tf.placeholder(tf.float32, [None, 1], name="reward")
+            # sample index and index of the picked behavior: NSAMPLES x 2 (either 0, 1, 3 or 3, stay, straight, l or r)
+            self._pick = tf.placeholder(tf.int32, [None, 2], name="pick")
+            # data binning layer
+            xin_pool = create_meanpool2d("xin_pool", self._x_in, 1, self.t_bin)
+            # the input convolution depends on the network structure: branched or fully mixed
+            if 't' in self._branches:
+                x_1, x_2, x_3 = tf.split(xin_pool, num_or_size_splits=3, axis=1, name="input_split")
+                # create convolution and deep layers for eac branch
+                time = self._create_convolution_layer('t', x_1)
+                time = self._create_branch('t', time)
+                speed = self._create_convolution_layer('s', x_2)
+                speed = self._create_branch('s', speed)
+                angle = self._create_convolution_layer('a', x_3)
+                angle = self._create_branch('a', angle)
+                # combine branch outputs and create mixed branch
+                mix = tf.concat([time, speed, angle], 1, self.cvn("HIDDEN", 'm', -1))
+                mix = self._create_branch('m', mix)
+            else:
+                # fully mixed network
+                mix = self._create_convolution_layer('m', xin_pool)
+                mix = self._create_branch('m', mix)
+            self._value_out, self._log_value_out = self._create_values(mix)
+            self._action = tf.multinomial(self._log_value_out, 1, name="action")
+            self._responsible_out = tf.gather_nd(self._log_value_out, self._pick, "responsible_out")
+            self._loss = -tf.reduce_sum(self._responsible_out * self._reward)
+            tf.add_to_collection("losses", self._loss)
+            # compute the total loss which includes our weight-decay
+            self._total_loss = tf.add_n(tf.get_collection("losses"), name="total_loss")
+            # create training step
+            optimizer = tf.train.AdamOptimizer(1e-5)
+            gradients, variables = zip(*optimizer.compute_gradients(self._total_loss))
+            self._train_step = optimizer.apply_gradients(zip(gradients, variables))
+            # store our training operation
+            tf.add_to_collection('train_op', self._train_step)
+            # create session
+            self._session = tf.Session()
+            # mark network as initialized
+            self.initialized = True
+            # intialize all variables
+            self.init_variables()
+
+    def load(self, meta_file: str, checkpoint_file: str):
+        """
+        Loads model definitions from model description file and populates data from given checkpoint
+        :param meta_file: The model definition file
+        :param checkpoint_file: The saved model checkpoint (weights, etc.)
+        """
+        super().load(meta_file, checkpoint_file)
+        with self._graph.as_default():
+            # restore graph and variables
+            self._session = tf.Session()
+            saver = tf.train.import_meta_graph(meta_file)
+            saver.restore(self._session, checkpoint_file)
+            graph = self._session.graph
+            self._value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', 0)+":0")
+            self._log_value_out = graph.get_tensor_by_name(self.cvn("OUTPUT", 'o', -1) + ":0")
+            self._action = tf.multinomial(self._log_value_out, 1, name="action")
+            self._responsible_out = graph.get_tensor_by_name("responsible_out:0")
+            self._x_in = graph.get_tensor_by_name("x_in:0")
+            self._keep_prob = graph.get_tensor_by_name("keep_prob:0")
+            self._reward = graph.get_tensor_by_name("reward:0")
+            self._pick = graph.get_tensor_by_name("pick:0")
+            self._branches = ['t', 'o']
+            # collect deterministic removal units and use these
+            # to determine which branches exist and how many layers they have
+            possible_branches = ['t', 's', 'a', 'm', 'o']
+            self._branches = []
+            self._det_remove = {}
+            for b in possible_branches:
+                try:
+                    graph.get_tensor_by_name(self.cvn("REMOVE", b, 0) + ":0")
+                    # we found layer 0 in this branch so it exists
+                    self._branches.append(b)
+                    self._det_remove[b] = []
+                    i = 0
+                    try:
+                        while True:
+                            self._det_remove[b].append(graph.get_tensor_by_name(self.cvn("REMOVE", b, i) + ":0"))
+                            i += 1
+                    except KeyError:
+                        pass
+                except KeyError:
+                    continue
+            if 't' in self._branches:
+                self.n_layers_branch = len(self._det_remove['t'])
+            else:
+                self.n_layers_branch = 0
+            self.n_units = [0, 0]
+            self.n_layers_mixed = len(self._det_remove['m'])
+            self._n_mixed_dense = [self._det_remove['m'][i].shape[0].value for i in range(self.n_layers_mixed)]
+            self.n_units[1] = self._n_mixed_dense[0]
+            if self.n_layers_branch > 0:
+                self._n_branch_dense = [self._det_remove['t'][i].shape[0].value for i in range(self.n_layers_branch)]
+                self.n_units[0] = self._n_branch_dense[0]
+            else:
+                self._n_branch_dense = []
+            # retrieve training step
+            self._train_step = graph.get_collection("train_op")[0]
+            # set up loss calculation
+            self._loss = -(tf.log(self._responsible_out) * self._reward)[0]
+        self.initialized = True
+        # use convolution data biases to get number of convolution layers
+        conv_biases = self.convolution_data[1]
+        self.n_conv_layers = conv_biases.popitem()[1].shape[0]
+
+    def clear(self):
+        """
+        Clears the network graph
+        """
+        if not self.initialized:
+            return
+        super().clear()
+        self.n_conv_layers = None
+        self.n_units = None
+        self.n_layers_branch = None
+        self.n_layers_mixed = None
+        # mark network as not initialized
+        self.initialized = False
+
+    def train(self, x_in, reward: np.ndarray, pick: np.ndarray, keep=0.5):
+        """
+        Runs a single move training step
+        :param x_in: The network input
+        :param reward: The delivered reward
+        :param pick: The chosen action
+        :param keep: The keep probability of each unit
+        """
+        self._check_init()
+        if reward.size > 1:
+            warn("Providing more than one concurrent training sample is discouraged since credit assignment unclear.")
+        with self._graph.as_default():
+            fd = self._create_feed_dict(x_in, reward, pick, keep)
+            self._train_step.run(fd, self._session)
+
+    def get_values(self, x_in, keep=1.0, det_drop=None) -> np.ndarray:
+        """
+        Compute the predicted value of straight swim or turn
+        :param x_in: The temperature history as network input
+        :param keep: The keep probability of each unit
+        :param det_drop: The deterministic keep/drop of each unit
+        :return: 4-element vector of values for stay, straight, left and right
+        """
+        self._check_init()
+        with self._graph.as_default():
+            v = self._value_out.eval(self._create_feed_dict(x_in, keep=keep, removal=det_drop), session=self._session)
+        return v
+
+    def choose_action(self, x_in, p_explore=0.01, keep=1.0, det_drop=None):
+        """
+        Our policy. Calculate value of each action given input. Choose random action with p_explore probability
+        and higher-valued action otherwise
+        :param x_in: The temperature history as network input
+        :param p_explore: Probability of choosing random action instead of following policy
+        :param keep: The keep probability of each unit
+        :param det_drop: The deterministic keep/drop of each unit
+        :return:
+            [0]: The index of the chosen action (stay=0, straight=1, left=2, right=3)
+            [1]: True if the action was exploratory
+        """
+        if self._uni_cash.next_rand() < p_explore:
+            return np.random.randint(4), True
+        with self._graph.as_default():
+            a = self._action.eval(self._create_feed_dict(x_in, keep=keep, removal=det_drop), session=self._session)
+        return np.asscalar(a), False
+
+    def final_hidden_output(self, xbatch, det_drop=None) -> np.ndarray:
+        """
+        Computes the activations of all units in the last hidden layer of the network
+        :param xbatch: The network input
+        :param det_drop: The deterministic keep/drop of each unit
+        :return: The activations of the last hidden network layer
+        """
+        self._check_init()
+        # obtain the name of the last hidden layer
+        tensor_name = self.cvn("HIDDEN", 't', self.n_layers_branch-1)
+        tensor_name = tensor_name + ":0"
+        with self._graph.as_default():
+            fd = self._create_feed_dict(xbatch, removal=det_drop)
+            tensor = self._graph.get_tensor_by_name(tensor_name)
+            layer_out = tensor.eval(fd, session=self._session)
+        return layer_out
+
+    def unit_stimulus_responses(self, temperature, temp_mean, temp_std) -> dict:
+        """
+        Computes and returns the responses of each unit in the network in response to a stimulus
+        :param temperature: The temperature stimulus in C
+        :param temp_mean: The temperature average when the network was trained
+        :param temp_std: The temperature standard deviation when the network was trained
+        :return: Branch-wise dictionary of lists with n_hidden elements, each an array of time x n_units activations
+        """
+        self._check_init()
+        temperature = (temperature - temp_mean) / temp_std
+        with self._graph.as_default():
+            history = self.input_dims[2]
+            activity = {}
+            ix = indexing_matrix(np.arange(temperature.size), history - 1, 0, temperature.size)[0]
+            model_in = np.zeros((ix.shape[0], 3, history, 1))
+            model_in[:, 0, :, 0] = temperature[ix]
+            for b in self._branches:
+                if b == 'o':
+                    activity[b] = [self.get_values(model_in)]
+                    continue
+                n_layers = self.n_layers_mixed if b == 'm' else self.n_layers_branch
+                for i in range(n_layers):
+                    h = self._session.graph.get_tensor_by_name(self.cvn("HIDDEN", b, i)+":0")
+                    fd = self._create_feed_dict(model_in, keep=1.0)
+                    if b in activity:
+                        activity[b].append(h.eval(feed_dict=fd, session=self._session))
+                    else:
+                        activity[b] = [h.eval(feed_dict=fd, session=self._session)]
+            return activity
+
+    @property
+    def convolution_data(self):
+        """
+        The weights and biases of the convolution layer(s)
+        """
+        self._check_init()
+        with self._graph.as_default():
+            g = self._session.graph
+            w = {tg: g.get_tensor_by_name(self.cvn("WEIGHT", tg, -1)+":0").eval(session=self._session) for tg in ['t']}
+            b = {tg: g.get_tensor_by_name(self.cvn("BIAS", tg, -1) + ":0").eval(session=self._session) for tg in ['t']}
+        return w, b
+
+
 class RandCash:
     """
     Represents cash of random numbers to draw from
