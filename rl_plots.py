@@ -31,7 +31,7 @@ from data_stores import SimulationStore
 
 
 # file definitions
-base_path_rl = "./model_data/SimpleRL_Net/"
+base_path_rl = "./model_data/FullRL_Net/"
 paths_rl = [f + '/' for f in os.listdir(base_path_rl) if "mx_disc_" in f]
 
 base_path_zf = "./model_data/Adam_1e-4/sepInput_mixTrain/"
@@ -45,7 +45,7 @@ def run_flat_gradient(model_path):
     arena = CircleRLTrainer(rl_net, sim_radius, 22, 22, 26)
     arena.t_std = t_std
     arena.t_mean = t_mean
-    arena.p_explore = 0.5
+    arena.p_explore = 0.25
     return circ_train.run_sim(GlobalDefs.n_steps, False)[0]
 
 
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     fig, ax = pl.subplots()
     sns.tsplot(grad_errors, ip_given, ax=ax)
     ax.plot([786680, 786680], [2.0, 5.0], 'k--')
-    ax.plot([786680, 1e7], [2.4, 2.4], 'k--')
+    ax.plot([786680, 1.7e7], [2.4, 2.4], 'k--')
     ax.set_xlabel("# Rewards given")
     ax.set_ylabel("Navigation error")
     sns.despine(fig, ax)
@@ -172,18 +172,18 @@ if __name__ == "__main__":
     trained_rl = np.zeros_like(naive_rl)
     for i, p in enumerate(paths_rl):
         mdata = c.ModelData(mpath(base_path_rl, p))
-        with c.SimpleRLNetwork() as rl_net:
+        with c.ReinforcementLearningNetwork() as rl_net:
             rl_net.load(mdata.ModelDefinition, mdata.FirstCheckpoint)
             circ_train = CircleRLTrainer(rl_net, sim_radius, sim_min, sim_max, 26)
             circ_train.t_std = t_std
             circ_train.t_mean = t_mean
-            circ_train.p_explore = 0.5  # try to match to exploration in predictive network (best taken 50% of time)
+            circ_train.p_explore = 0.25  # try to match to exploration in predictive network (best taken 50% of time)
             naive_pos = circ_train.run_sim(GlobalDefs.n_steps, False)[0]
             rl_net.load(mdata.ModelDefinition, mdata.LastCheckpoint)
             circ_train = CircleRLTrainer(rl_net, sim_radius, sim_min, sim_max, 26)
             circ_train.t_std = t_std
             circ_train.t_mean = t_mean
-            circ_train.p_explore = 0.5  # try to match to exploration in predictive network (best taken 50% of time)
+            circ_train.p_explore = 0.25  # try to match to exploration in predictive network (best taken 50% of time)
             trained_pos, _, trained_behav = circ_train.run_sim(GlobalDefs.n_steps, False)
             rl_turn_coherence.append(a.turn_coherence(np.array(trained_behav), 10))
             rl_da.append(np.rad2deg(get_bout_da(trained_pos, get_bout_starts(trained_pos))))
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # plot bout frequency modulation in the gradient
     fig, ax = pl.subplots()
-    sns.tsplot(bout_freqs, bout_bin_centers, n_boot=1000, color="C1", err_style="ci_band")
+    sns.tsplot(bout_freqs, bout_bin_centers, n_boot=1000, color="C1", err_style="ci_band", estimator=np.nanmean)
     ax.set_xlim(23, 36)
     ax.set_xticks([25, 30, 35])
     ax.set_yticks([0.5, 0.75, 1, 1.25])
@@ -312,7 +312,7 @@ if __name__ == "__main__":
     all_ids_rl = []
     for i, p in enumerate(paths_rl):
         mdata = c.ModelData(mpath(base_path_rl, p))
-        with c.SimpleRLNetwork() as rl_net:
+        with c.ReinforcementLearningNetwork() as rl_net:
             rl_net.load(mdata.ModelDefinition, mdata.LastCheckpoint)
             # prepend lead-in to stimulus
             lead_in = np.full(rl_net.input_dims[2] - 1, np.mean(temperature[:10]))
@@ -321,7 +321,7 @@ if __name__ == "__main__":
             cell_res = np.hstack(activity_out['t'])
             id_mat = np.zeros((3, cell_res.shape[1]), dtype=np.int32)
             id_mat[0, :] = i
-            hidden_sizes = [128] * 3  # currently hard coded, could be extracted from rl_net object
+            hidden_sizes = [128] * rl_net.n_layers_branch
             start = 0
             for layer, hs in enumerate(hidden_sizes):
                 id_mat[1, start:start + hs] = layer
