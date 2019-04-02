@@ -39,7 +39,7 @@ every invocation, the assignment of units to individual cluster indices is not
 deterministic (in other words, the activity profile belonging to cluster 1 on
 one invocation may be found in cluster 5 on the next). Therefore any
 correspondence between zebrafish / _C. elegans_ types and ANN cluster centroids
-has to be adjusted accordingly.
+has to be adjusted accordingly. This includes retraining and ablations.
 
 For zebrafish the assignments are found by calling zfish_ann_correspondence.py
 whereas they are visual in the case of _C. elegans_, in other words here the
