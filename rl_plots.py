@@ -408,7 +408,7 @@ if __name__ == "__main__":
     # load zebrafish region results and create Rh56 regressor matrix for FastON, SlowON, FastOFF, SlowOFF
     result_labels = ["Rh6"]
     region_results = {}  # type: Dict[str, RegionResults]
-    analysis_file = h5py.File('H:/ClusterLocations_170327_clustByMaxCorr/regiondata.hdf5', 'r')
+    analysis_file = h5py.File('regiondata.hdf5', 'r')
     for rl in result_labels:
         region_results[rl] = pickle.loads(np.array(analysis_file[rl]))
     analysis_file.close()
