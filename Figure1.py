@@ -122,7 +122,7 @@ def compute_da_modulation(model_path, drop_list=None):
     # get temperature at each bout start
     temp_ev = a.temp_convert(np.sqrt(np.sum(pos_ev[bs_ev.astype(bool), :2]**2, 1)), 'r')
     temp_flt = a.temp_convert(np.sqrt(np.sum(pos_flt[bs_flt.astype(bool), :2] ** 2, 1)), 'r')
-    # get delta-temperature effected by each bout
+    # get delta-temperature effected by each previous bout
     dt_ev = np.r_[0, np.diff(temp_ev)]
     dt_flt = np.r_[0, np.diff(temp_flt)]
     # only consider data above T_Preferred and away from the edge
