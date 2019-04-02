@@ -205,7 +205,7 @@ if __name__ == "__main__":
     # panel for ON-OFF type search in zebrafish
     on_off = 7
     # load fish activity data
-    dfile = h5py.File('H:/ClusterLocations_170327_clustByMaxCorr/datafile_170327.hdf5', 'r')
+    dfile = h5py.File('zebrafish_brain_data.hdf5', 'r')
     all_activity = np.array(dfile['all_activity'])
     no_nan_aa = np.array(dfile['no_nan_aa'])
     tf_centroids = np.array(dfile['tf_centroids'])[no_nan_aa, :]
