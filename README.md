@@ -65,6 +65,11 @@ strict requirement for that particular library version.
 * [pandas](https://pandas.pydata.org/) - 0.23
 * [h5py](http://docs.h5py.org/) - 2.8
 
+## Associated data
+Associated project data are deposited on zenodo.org:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3258831.svg)](https://doi.org/10.5281/zenodo.3258831)
+
 ---
 All code is licensed under the MIT license. See LICENSE for details.  
 &copy; Martin Haesemeyer, 2017-2019
