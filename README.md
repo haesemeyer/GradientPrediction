@@ -2,7 +2,7 @@
 
 Repository for the code used in generating, training and evaluating temperature
 navigation ANNs in
-([Haesemeyer, Schier & Engert, 2018](https://www.biorxiv.org/content/10.1101/390435v2)).
+([Haesemeyer, Schier & Engert,Neuron, 2019](https://www.cell.com/neuron/fulltext/S0896-6273(19)30601-4)).
 
 
 ## Main code modules
